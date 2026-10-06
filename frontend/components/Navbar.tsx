@@ -11,18 +11,23 @@ import {
   Layers, 
   Info, 
   Mail, 
-  Home
+  Home,
+  User,
+  LogOut,
+  ShieldCheck
 } from 'lucide-react';
+import { useCart } from '@/context/CartContext';
+import { useAuth } from '@/context/AuthContext';
 
 interface NavbarProps {
-  cartCount?: number;
-  onOpenCart?: () => void;
   onOpenQuiz?: () => void;
 }
 
-export default function Navbar({ cartCount = 0, onOpenCart, onOpenQuiz }: NavbarProps) {
+export default function Navbar({ onOpenQuiz }: NavbarProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const pathname = usePathname();
+  const { totalCartCount, setIsCartOpen } = useCart();
+  const { user, isAdmin, logout } = useAuth();
 
   const navLinks = [
     { name: 'Home', href: '/', icon: <Home className="w-4 h-4 mr-1.5" /> },
@@ -41,7 +46,7 @@ export default function Navbar({ cartCount = 0, onOpenCart, onOpenQuiz }: Navbar
 
       {/* Main Glassmorphic Header */}
       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-xl border-b border-[#E8EFE9] shadow-xs transition-all">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between gap-6">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between gap-4 sm:gap-6">
           
           {/* Brand Logo */}
           <Link href="/" className="flex items-center gap-3 group">
@@ -80,28 +85,65 @@ export default function Navbar({ cartCount = 0, onOpenCart, onOpenQuiz }: Navbar
           </nav>
 
           {/* Action CTAs */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5 sm:gap-3">
             {onOpenQuiz && (
               <button
                 onClick={onOpenQuiz}
-                className="hidden sm:inline-flex items-center px-4 py-2 rounded-full text-xs font-semibold bg-[#E8EFE9] text-[#1B382B] border border-[#C4D7C8] hover:bg-[#dce7de] transition shadow-xs cursor-pointer"
+                className="hidden lg:inline-flex items-center px-4 py-2 rounded-full text-xs font-semibold bg-[#E8EFE9] text-[#1B382B] border border-[#C4D7C8] hover:bg-[#dce7de] transition shadow-xs cursor-pointer"
               >
                 <Sparkles className="w-3.5 h-3.5 mr-1.5 text-[#C5A059]" />
                 Find My Routine
               </button>
             )}
 
+            {/* Account Controls */}
+            {user ? (
+              <div className="flex items-center gap-2">
+                {isAdmin ? (
+                  <Link
+                    href="/admin"
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#142A20] text-[#EFE3C3] text-xs font-bold border border-[#C5A059]/40"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5 text-[#C5A059]" /> Admin
+                  </Link>
+                ) : (
+                  <span className="text-xs font-bold text-stone-700 hidden sm:inline">
+                    {user.name.split(' ')[0]}
+                  </span>
+                )}
+                <button
+                  onClick={logout}
+                  title="Sign out"
+                  className="p-2 rounded-full text-stone-400 hover:text-rose-700 hover:bg-rose-50 transition cursor-pointer"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <Link
+                href="/login"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold text-stone-700 hover:text-[#1B382B] hover:bg-[#F3F6F4] transition"
+              >
+                <User className="w-4 h-4 text-[#1B382B]" />
+                <span className="hidden sm:inline">Sign In</span>
+              </Link>
+            )}
+
+            {/* Modern Curved "Cart" Pill Button */}
             <button
-              onClick={onOpenCart}
-              className="relative p-2.5 rounded-full bg-[#F3F6F4] hover:bg-[#E8EFE9] text-[#161D1A] transition cursor-pointer"
-              aria-label="View Cart"
+              onClick={() => setIsCartOpen(true)}
+              className="inline-flex items-center gap-2 px-4.5 py-2 rounded-full bg-[#1B382B] hover:bg-[#142A20] text-white border border-[#C5A059]/40 transition shadow-md hover:shadow-lg shadow-[#1B382B]/10 active:scale-95 cursor-pointer group"
+              aria-label="Open Shopping Cart"
             >
-              <ShoppingBag className="w-5 h-5 text-[#1B382B]" />
-              {cartCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-5 h-5 bg-[#C5A059] text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-in zoom-in">
-                  {cartCount}
-                </span>
-              )}
+              <div className="relative">
+                <ShoppingBag className="w-4 h-4 text-[#EFE3C3] group-hover:scale-110 transition-transform" />
+                {totalCartCount > 0 && (
+                  <span className="absolute -top-1.5 -right-2 min-w-4 h-4 px-1 bg-[#C5A059] text-[#142A20] text-[9px] font-black rounded-full flex items-center justify-center shadow-xs">
+                    {totalCartCount}
+                  </span>
+                )}
+              </div>
+              <span className="text-xs font-bold tracking-wide text-white">Cart</span>
             </button>
 
             {/* Mobile Menu Button */}
@@ -134,16 +176,23 @@ export default function Navbar({ cartCount = 0, onOpenCart, onOpenQuiz }: Navbar
                 </Link>
               );
             })}
-            {onOpenQuiz && (
+            {!user ? (
+              <Link
+                href="/login"
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex items-center px-4 py-3 rounded-xl text-sm font-medium text-stone-700 hover:bg-stone-50"
+              >
+                <User className="w-4 h-4 mr-2" /> Sign In / Register
+              </Link>
+            ) : (
               <button
                 onClick={() => {
+                  logout();
                   setMobileMenuOpen(false);
-                  onOpenQuiz();
                 }}
-                className="w-full mt-2 inline-flex items-center justify-center px-4 py-3 rounded-xl text-xs font-semibold bg-[#1B382B] text-white shadow-xs cursor-pointer"
+                className="w-full flex items-center px-4 py-3 rounded-xl text-sm font-medium text-rose-700 hover:bg-rose-50"
               >
-                <Sparkles className="w-4 h-4 mr-2 text-[#C5A059]" />
-                Skin Diagnostic Quiz
+                <LogOut className="w-4 h-4 mr-2" /> Sign Out
               </button>
             )}
           </div>
