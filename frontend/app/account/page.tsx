@@ -11,10 +11,10 @@ import {
   Phone, 
   ShoppingBag, 
   LogOut, 
-  ShieldCheck, 
   ArrowRight,
-  PackageCheck,
-  Truck
+  Truck,
+  MapPin,
+  CheckCircle2
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { fetchUserOrders } from '@/services/api';
@@ -47,29 +47,52 @@ export default function AccountPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
           
           {/* Profile Card */}
-          <div className="bg-white rounded-3xl border border-[#E8EFE9] p-6 shadow-xs">
-            <div className="w-16 h-16 rounded-3xl bg-[#E8EFE9] text-[#1B382B] flex items-center justify-center mb-4 border border-[#C4D7C8]">
-              <User className="w-8 h-8 text-[#C5A059]" />
+          <div className="bg-white rounded-3xl border border-[#E8EFE9] p-6 shadow-xs space-y-4">
+            <div className="w-16 h-16 rounded-3xl bg-[#E8EFE9] text-[#1B382B] flex items-center justify-center border border-[#C4D7C8]">
+              {user.avatar_url ? (
+                <img src={user.avatar_url} alt={user.name} className="w-full h-full object-cover rounded-3xl" />
+              ) : (
+                <User className="w-8 h-8 text-[#C5A059]" />
+              )}
             </div>
 
-            <h2 className="text-xl font-serif font-bold text-[#161D1A]">{user.name}</h2>
-            <p className="text-xs text-stone-500 mt-1 flex items-center gap-1.5">
-              <Mail className="w-3.5 h-3.5 text-stone-400" /> {user.email}
-            </p>
-            {user.phone && (
-              <p className="text-xs text-stone-500 mt-1 flex items-center gap-1.5">
-                <Phone className="w-3.5 h-3.5 text-stone-400" /> {user.phone}
-              </p>
+            <div>
+              <h2 className="text-xl font-serif font-bold text-[#161D1A]">{user.name}</h2>
+              {user.email && (
+                <p className="text-xs text-stone-500 mt-1 flex items-center gap-1.5">
+                  <Mail className="w-3.5 h-3.5 text-stone-400" /> {user.email}
+                </p>
+              )}
+              {user.phone && (
+                <p className="text-xs text-stone-500 mt-1 flex items-center gap-1.5">
+                  <Phone className="w-3.5 h-3.5 text-stone-400" /> {user.phone}
+                </p>
+              )}
+            </div>
+
+            {/* Address Details */}
+            {user.town && (
+              <div className="pt-3 border-t border-[#F3F6F4] text-xs text-stone-600 space-y-1">
+                <span className="text-[10px] uppercase font-bold text-[#C5A059] block">
+                  Delivery Destination
+                </span>
+                <div className="flex items-start gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-stone-400 shrink-0 mt-0.5" />
+                  <span>
+                    {user.address_line1}, {user.town}, {user.district}, {user.province} ({user.postal_code})
+                  </span>
+                </div>
+              </div>
             )}
 
-            <div className="mt-4 pt-4 border-t border-[#F3F6F4] flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400">Account Role</span>
+            <div className="pt-3 border-t border-[#F3F6F4] flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400">Account Type</span>
               <span className="px-2.5 py-0.5 rounded-full bg-[#E8EFE9] text-[#1B382B] font-bold text-[10px] capitalize">
-                {user.role}
+                {user.role} Member
               </span>
             </div>
 
-            <div className="mt-6 pt-4 border-t border-[#F3F6F4] space-y-2">
+            <div className="pt-4 border-t border-[#F3F6F4] space-y-2">
               <Link
                 href="/track"
                 className="w-full py-2.5 px-4 rounded-xl bg-stone-50 hover:bg-[#E8EFE9] text-stone-700 text-xs font-semibold flex items-center justify-between transition"

@@ -29,8 +29,6 @@ export default function CartDrawer() {
 
   const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false);
 
-  if (!isCartOpen) return null;
-
   const FREE_SHIPPING_THRESHOLD = 7500;
   const progressPercent = Math.min((cartSubtotal / FREE_SHIPPING_THRESHOLD) * 100, 100);
   const amountToFreeShipping = Math.max(FREE_SHIPPING_THRESHOLD - cartSubtotal, 0);
@@ -42,7 +40,7 @@ export default function CartDrawer() {
 
   return (
     <>
-      <div className="fixed inset-0 z-50 overflow-hidden">
+      <div className={`fixed inset-0 z-50 overflow-hidden ${isCartOpen ? '' : 'hidden'}`}>
         {/* Backdrop */}
         <div 
           onClick={() => setIsCartOpen(false)}

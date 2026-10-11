@@ -229,7 +229,14 @@ export async function placeOrder(orderData: {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(orderData)
     });
-    return await res.json();
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      return {
+        success: false,
+        message: data.message || 'Unable to place order. Please try again.'
+      };
+    }
+    return data;
   } catch (err) {
     console.error('Error placing order:', err);
     return { success: false, message: 'Could not connect to checkout service' };

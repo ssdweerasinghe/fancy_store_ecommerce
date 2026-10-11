@@ -12,6 +12,7 @@ router.post('/checkout', async (req, res) => {
     connection = await pool.getConnection();
 
     const {
+      user_id = null,
       customer_name,
       customer_email,
       customer_phone,
@@ -23,7 +24,7 @@ router.post('/checkout', async (req, res) => {
     if (!customer_name || !customer_email || !customer_phone || !shipping_address) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide recipient name, email, phone number, and delivery address'
+        message: 'Recipient name, email, phone number, and delivery address are all required'
       });
     }
 
@@ -34,8 +35,15 @@ router.post('/checkout', async (req, res) => {
       });
     }
 
+    const cleanName = customer_name.trim();
+    const cleanEmail = customer_email.trim();
+    const cleanPhone = customer_phone.trim();
+    const cleanAddress = shipping_address.trim();
+    const normalizedPaymentMethod = String(payment_method).trim().toLowerCase() || 'cash_on_delivery';
+
     await connection.beginTransaction();
 
+    // 1. Validate stock and calculate total amount
     let totalAmount = 0;
     const validatedItems = [];
 
@@ -46,14 +54,14 @@ router.post('/checkout', async (req, res) => {
       );
 
       if (productRows.length === 0) {
-        throw new Error(`Product ID ${item.product_id} no longer exists`);
+        throw new Error(`Product ID ${item.product_id} is no longer available`);
       }
 
       const product = productRows[0];
       const qty = parseInt(item.quantity, 10) || 1;
 
       if (product.stock_quantity < qty) {
-        throw new Error(`Insufficient inventory for ${product.name}. Available: ${product.stock_quantity}`);
+        throw new Error(`Insufficient inventory for "${product.name}". Available stock: ${product.stock_quantity}`);
       }
 
       const itemTotal = Number(product.price) * qty;
@@ -74,17 +82,53 @@ router.post('/checkout', async (req, res) => {
       );
     }
 
-    // Insert order record
-    const [orderResult] = await connection.query(
-      `INSERT INTO orders 
-        (customer_name, customer_email, customer_phone, shipping_address, payment_method, total_amount, status) 
-       VALUES (?, ?, ?, ?, ?, ?, 'confirmed')`,
-      [customer_name, customer_email, customer_phone, shipping_address, payment_method, totalAmount]
-    );
+    // 2. Discover available columns in orders table dynamically
+    const [cols] = await connection.query(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'orders';
+    `);
+    const availableCols = cols.map((c) => c.COLUMN_NAME);
 
+    // Build adaptive insert statement
+    const insertFields = [];
+    const insertValues = [];
+    const placeholders = [];
+
+    const addField = (colName, val) => {
+      if (availableCols.includes(colName)) {
+        insertFields.push(colName);
+        insertValues.push(val);
+        placeholders.push('?');
+      }
+    };
+
+    // Standard columns
+    addField('customer_name', cleanName);
+    addField('customer_email', cleanEmail);
+    addField('customer_phone', cleanPhone);
+    addField('shipping_address', cleanAddress);
+    addField('payment_method', normalizedPaymentMethod);
+    addField('total_amount', totalAmount);
+    addField('status', 'confirmed');
+
+    // Legacy backup columns (if they exist in the schema)
+    addField('name', cleanName);
+    addField('email', cleanEmail);
+    addField('phone', cleanPhone);
+    addField('phone_number', cleanPhone);
+    addField('address', cleanAddress);
+    if (user_id) addField('user_id', Number(user_id));
+
+    const insertSql = `
+      INSERT INTO orders (${insertFields.join(', ')})
+      VALUES (${placeholders.join(', ')})
+    `;
+
+    const [orderResult] = await connection.query(insertSql, insertValues);
     const orderId = orderResult.insertId;
 
-    // Insert order items
+    // 3. Insert order items
     for (const item of validatedItems) {
       await connection.query(
         `INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal)
@@ -95,27 +139,27 @@ router.post('/checkout', async (req, res) => {
 
     await connection.commit();
 
-    // Trigger asynchronous email confirmation
+    // Trigger async email confirmation
     sendOrderConfirmationEmail({
       order_id: orderId,
-      customer_name,
-      customer_email,
-      customer_phone,
-      shipping_address,
-      payment_method,
+      customer_name: cleanName,
+      customer_email: cleanEmail,
+      customer_phone: cleanPhone,
+      shipping_address: cleanAddress,
+      payment_method: normalizedPaymentMethod,
       total_amount: totalAmount,
       items: validatedItems
-    }).catch((err) => console.error('Email dispatch error:', err));
+    }).catch((err) => console.error('Email dispatch error:', err.message));
 
     res.status(201).json({
       success: true,
-      message: 'Order placed successfully',
+      message: 'Order confirmed and placed successfully',
       data: {
         order_id: orderId,
-        customer_name,
-        customer_email,
+        customer_name: cleanName,
+        customer_email: cleanEmail,
         total_amount: totalAmount,
-        payment_method,
+        payment_method: normalizedPaymentMethod,
         status: 'confirmed',
         items_count: validatedItems.length
       }
@@ -176,14 +220,20 @@ router.get('/track/:query', async (req, res) => {
     const isNum = !isNaN(Number(query));
 
     let sql = `
-      SELECT o.id, o.customer_name, o.customer_phone, o.total_amount, o.status, o.payment_method, o.created_at
+      SELECT o.id, 
+             COALESCE(o.customer_name, o.name) AS customer_name,
+             COALESCE(o.customer_phone, o.phone_number, o.phone) AS customer_phone,
+             o.total_amount, 
+             o.status, 
+             o.payment_method, 
+             o.created_at
       FROM orders o
-      WHERE ${isNum ? 'o.id = ? OR o.customer_phone LIKE ?' : 'o.customer_phone LIKE ?'}
+      WHERE ${isNum ? 'o.id = ? OR o.customer_phone LIKE ? OR o.phone_number LIKE ?' : 'o.customer_phone LIKE ? OR o.phone_number LIKE ?'}
       ORDER BY o.id DESC
       LIMIT 5
     `;
 
-    const params = isNum ? [query, `%${query}%`] : [`%${query}%`];
+    const params = isNum ? [query, `%${query}%`, `%${query}%`] : [`%${query}%`, `%${query}%`];
     const [orders] = await pool.query(sql, params);
 
     if (orders.length === 0) {
@@ -207,18 +257,19 @@ router.get('/track/:query', async (req, res) => {
   }
 });
 
-// 5. GET /api/orders/user/my-orders (Logged in customer order history)
+// 5. GET /api/orders/user/my-orders (Logged-in customer order history)
 router.get('/user/my-orders', verifyToken, async (req, res) => {
   try {
     const userEmail = req.user.email;
+    const userId = req.user.id;
     const [orders] = await pool.query(`
       SELECT o.*, COUNT(oi.id) as items_count
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
-      WHERE o.customer_email = ?
+      WHERE o.user_id = ? OR o.customer_email = ? OR o.email = ?
       GROUP BY o.id
       ORDER BY o.id DESC
-    `, [userEmail]);
+    `, [userId, userEmail, userEmail]);
 
     res.json({ success: true, data: orders });
   } catch (err) {
