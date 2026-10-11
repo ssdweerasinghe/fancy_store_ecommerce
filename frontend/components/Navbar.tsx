@@ -14,7 +14,8 @@ import {
   Home,
   User,
   LogOut,
-  ShieldCheck
+  ShieldCheck,
+  Truck
 } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { useAuth } from '@/context/AuthContext';
@@ -32,23 +33,21 @@ export default function Navbar({ onOpenQuiz }: NavbarProps) {
   const navLinks = [
     { name: 'Home', href: '/', icon: <Home className="w-4 h-4 mr-1.5" /> },
     { name: 'Catalog', href: '/catalog', icon: <Layers className="w-4 h-4 mr-1.5" /> },
+    { name: 'Track Order', href: '/track', icon: <Truck className="w-4 h-4 mr-1.5" /> },
     { name: 'About Us', href: '/about', icon: <Info className="w-4 h-4 mr-1.5" /> },
     { name: 'Contact Us', href: '/contact', icon: <Mail className="w-4 h-4 mr-1.5" /> },
   ];
 
   return (
     <>
-      {/* Top Announcement Bar */}
       <div className="bg-[#142A20] text-emerald-100 text-xs py-2 px-4 text-center font-medium tracking-wide flex items-center justify-center gap-2 border-b border-emerald-900/40">
         <Sparkles className="w-3.5 h-3.5 text-[#C5A059]" />
         <span>Complimentary Skin Regimen Analysis & Islandwide Climate-Controlled Delivery</span>
       </div>
 
-      {/* Main Glassmorphic Header */}
       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-xl border-b border-[#E8EFE9] shadow-xs transition-all">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between gap-4 sm:gap-6">
           
-          {/* Brand Logo */}
           <Link href="/" className="flex items-center gap-3 group">
             <div className="w-10 h-10 rounded-2xl bg-[#1B382B] flex items-center justify-center text-white shadow-md shadow-[#1B382B]/20 group-hover:scale-105 transition-transform border border-[#C5A059]/30">
               <span className="font-serif font-black text-xl tracking-tighter text-[#EFE3C3]">F</span>
@@ -63,7 +62,6 @@ export default function Navbar({ onOpenQuiz }: NavbarProps) {
             </div>
           </Link>
 
-          {/* Desktop Navigation Links */}
           <nav className="hidden md:flex items-center gap-1 bg-[#F3F6F4] p-1.5 rounded-full border border-[#E3ECE5]">
             {navLinks.map((link) => {
               const isActive = pathname === link.href;
@@ -84,19 +82,7 @@ export default function Navbar({ onOpenQuiz }: NavbarProps) {
             })}
           </nav>
 
-          {/* Action CTAs */}
           <div className="flex items-center gap-2.5 sm:gap-3">
-            {onOpenQuiz && (
-              <button
-                onClick={onOpenQuiz}
-                className="hidden lg:inline-flex items-center px-4 py-2 rounded-full text-xs font-semibold bg-[#E8EFE9] text-[#1B382B] border border-[#C4D7C8] hover:bg-[#dce7de] transition shadow-xs cursor-pointer"
-              >
-                <Sparkles className="w-3.5 h-3.5 mr-1.5 text-[#C5A059]" />
-                Find My Routine
-              </button>
-            )}
-
-            {/* Account Controls */}
             {user ? (
               <div className="flex items-center gap-2">
                 {isAdmin ? (
@@ -107,9 +93,12 @@ export default function Navbar({ onOpenQuiz }: NavbarProps) {
                     <ShieldCheck className="w-3.5 h-3.5 text-[#C5A059]" /> Admin
                   </Link>
                 ) : (
-                  <span className="text-xs font-bold text-stone-700 hidden sm:inline">
-                    {user.name.split(' ')[0]}
-                  </span>
+                  <Link
+                    href="/account"
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#E8EFE9] text-[#1B382B] text-xs font-bold"
+                  >
+                    <User className="w-3.5 h-3.5 text-[#C5A059]" /> {user.name.split(' ')[0]}
+                  </Link>
                 )}
                 <button
                   onClick={logout}
@@ -129,10 +118,9 @@ export default function Navbar({ onOpenQuiz }: NavbarProps) {
               </Link>
             )}
 
-            {/* Modern Curved "Cart" Pill Button */}
             <button
               onClick={() => setIsCartOpen(true)}
-              className="inline-flex items-center gap-2 px-4.5 py-2 rounded-full bg-[#1B382B] hover:bg-[#142A20] text-white border border-[#C5A059]/40 transition shadow-md hover:shadow-lg shadow-[#1B382B]/10 active:scale-95 cursor-pointer group"
+              className="inline-flex items-center gap-2 px-4.5 py-2 rounded-full bg-[#1B382B] hover:bg-[#142A20] text-white border border-[#C5A059]/40 transition shadow-md active:scale-95 cursor-pointer group"
               aria-label="Open Shopping Cart"
             >
               <div className="relative">
@@ -146,7 +134,6 @@ export default function Navbar({ onOpenQuiz }: NavbarProps) {
               <span className="text-xs font-bold tracking-wide text-white">Cart</span>
             </button>
 
-            {/* Mobile Menu Button */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="md:hidden p-2 rounded-xl text-stone-700 hover:bg-stone-100 transition"
@@ -157,7 +144,6 @@ export default function Navbar({ onOpenQuiz }: NavbarProps) {
           </div>
         </div>
 
-        {/* Mobile Dropdown Menu */}
         {mobileMenuOpen && (
           <div className="md:hidden border-t border-[#E8EFE9] bg-white px-4 pt-3 pb-6 space-y-2">
             {navLinks.map((link) => {
@@ -176,25 +162,6 @@ export default function Navbar({ onOpenQuiz }: NavbarProps) {
                 </Link>
               );
             })}
-            {!user ? (
-              <Link
-                href="/login"
-                onClick={() => setMobileMenuOpen(false)}
-                className="flex items-center px-4 py-3 rounded-xl text-sm font-medium text-stone-700 hover:bg-stone-50"
-              >
-                <User className="w-4 h-4 mr-2" /> Sign In / Register
-              </Link>
-            ) : (
-              <button
-                onClick={() => {
-                  logout();
-                  setMobileMenuOpen(false);
-                }}
-                className="w-full flex items-center px-4 py-3 rounded-xl text-sm font-medium text-rose-700 hover:bg-rose-50"
-              >
-                <LogOut className="w-4 h-4 mr-2" /> Sign Out
-              </button>
-            )}
           </div>
         )}
       </header>

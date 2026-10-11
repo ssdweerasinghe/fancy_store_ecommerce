@@ -8,6 +8,7 @@ import pool from './config/db.js';
 import productRoutes from './routes/productRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
 import authRoutes from './routes/authRoutes.js';
+import routineRoutes from './routes/routineRoutes.js';
 
 dotenv.config();
 
@@ -28,6 +29,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 app.use('/api', productRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/routine', routineRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

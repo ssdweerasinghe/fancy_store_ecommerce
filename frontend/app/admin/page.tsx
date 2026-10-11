@@ -31,6 +31,7 @@ import {
   updateProduct, 
   deleteProduct, 
   uploadProductImage,
+  updateOrderStatus,
   Product, 
   Category 
 } from '@/services/api';
@@ -181,6 +182,16 @@ export default function AdminDashboardPage() {
     }
   };
 
+  const handleStatusChange = async (orderId: number, newStatus: string) => {
+    if (!token) return;
+    const res = await updateOrderStatus(token, orderId, newStatus);
+    if (res.success) {
+      loadData();
+    } else {
+      alert(res.message || 'Could not update status');
+    }
+  };
+
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token) return;
@@ -321,7 +332,7 @@ export default function AdminDashboardPage() {
                   : 'bg-white text-stone-600 border border-[#E8EFE9] hover:bg-stone-50'
               }`}
             >
-              Recent Customer Orders
+              Order Lifecycle Stream
             </button>
           </div>
 
@@ -470,10 +481,10 @@ export default function AdminDashboardPage() {
           </div>
         )}
 
-        {/* TAB 2: Order Stream */}
+        {/* TAB 2: Order Stream with Live Status Switcher */}
         {activeTab === 'orders' && (
           <div className="bg-white rounded-3xl border border-[#E8EFE9] p-6 shadow-xs">
-            <h2 className="text-xl font-serif font-bold text-[#161D1A] mb-4">Customer Order Stream</h2>
+            <h2 className="text-xl font-serif font-bold text-[#161D1A] mb-4">Customer Order Stream & Status</h2>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
@@ -483,7 +494,7 @@ export default function AdminDashboardPage() {
                     <th className="pb-3 px-4">Payment Method</th>
                     <th className="pb-3 px-4">Amount</th>
                     <th className="pb-3 px-4">Date</th>
-                    <th className="pb-3 px-4">Status</th>
+                    <th className="pb-3 px-4">Status & Dispatch Phase</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#F3F6F4]">
@@ -504,9 +515,18 @@ export default function AdminDashboardPage() {
                         {new Date(ord.created_at).toLocaleDateString()}
                       </td>
                       <td className="py-3.5 px-4">
-                        <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 font-bold text-[10px]">
-                          {ord.status}
-                        </span>
+                        {/* Live Dropdown to Update Status */}
+                        <select
+                          value={ord.status}
+                          onChange={(e) => handleStatusChange(ord.id, e.target.value)}
+                          className="px-3 py-1.5 rounded-full font-bold text-[11px] border border-[#E8EFE9] bg-stone-50 text-stone-800 capitalize focus:outline-[#1B382B] cursor-pointer"
+                        >
+                          <option value="confirmed">Confirmed</option>
+                          <option value="processing">Processing</option>
+                          <option value="shipped">Shipped</option>
+                          <option value="delivered">Delivered</option>
+                          <option value="cancelled">Cancelled</option>
+                        </select>
                       </td>
                     </tr>
                   ))}
@@ -633,7 +653,6 @@ export default function AdminDashboardPage() {
                   Product Photo Asset (Upload Local File or Paste URL)
                 </label>
 
-                {/* Hidden Local File Input */}
                 <input
                   type="file"
                   ref={fileInputRef}
@@ -642,7 +661,7 @@ export default function AdminDashboardPage() {
                   className="hidden"
                 />
 
-                <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+                <div className="flex flex-col sm:row gap-3 items-start sm:items-center">
                   <div className="relative flex-1 w-full">
                     <ImageIcon className="w-4 h-4 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                     <input
@@ -654,7 +673,6 @@ export default function AdminDashboardPage() {
                     />
                   </div>
 
-                  {/* Local Machine Upload Trigger Button */}
                   <button
                     type="button"
                     disabled={uploadingImage}
@@ -665,7 +683,6 @@ export default function AdminDashboardPage() {
                     <span>{uploadingImage ? 'Uploading...' : 'Upload from PC'}</span>
                   </button>
 
-                  {/* Thumbnail Live Preview */}
                   <div className="w-11 h-11 rounded-xl bg-stone-100 border border-[#E8EFE9] overflow-hidden shrink-0 flex items-center justify-center">
                     {formData.image_url ? (
                       <img
@@ -681,9 +698,6 @@ export default function AdminDashboardPage() {
                     )}
                   </div>
                 </div>
-                <span className="text-[10px] text-stone-400 mt-1 block">
-                  Click <strong>Upload from PC</strong> to choose an image from your computer, or paste a URL directly.
-                </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -721,11 +735,10 @@ export default function AdminDashboardPage() {
 
               <div>
                 <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1">
-                  Primary Benefits & Dermatological Claims
+                  Primary Benefits & Claims
                 </label>
                 <textarea
                   rows={2}
-                  placeholder="e.g., Alleviates tired orbital shadows, boosts elasticity, and restores moisture equilibrium."
                   value={formData.benefits}
                   onChange={(e) => setFormData({ ...formData, benefits: e.target.value })}
                   className="w-full px-4 py-2.5 rounded-xl border border-[#E8EFE9] bg-white focus:outline-[#1B382B]"
@@ -738,7 +751,6 @@ export default function AdminDashboardPage() {
                 </label>
                 <textarea
                   rows={2}
-                  placeholder="e.g., Hydrolyzed Collagen, Centella Asiatica, Bio-Peptide Matrix"
                   value={formData.key_ingredients}
                   onChange={(e) => setFormData({ ...formData, key_ingredients: e.target.value })}
                   className="w-full px-4 py-2.5 rounded-xl border border-[#E8EFE9] bg-white focus:outline-[#1B382B]"

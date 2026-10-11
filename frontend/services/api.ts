@@ -62,21 +62,18 @@ export async function fetchProducts(category?: string, skinType?: string): Promi
 
 export async function fetchProductById(id: string | number): Promise<Product | null> {
   try {
-    // 1. Direct fetch try #1
     let res = await fetch(`${BASE_URL}/products/${id}`, { cache: 'no-store' });
     if (res.ok) {
       const json = await res.json();
       if (json.success && json.data) return json.data;
     }
 
-    // 2. Direct fetch try #2
     res = await fetch(`${BASE_URL}/${id}`, { cache: 'no-store' });
     if (res.ok) {
       const json = await res.json();
       if (json.success && json.data) return json.data;
     }
 
-    // 3. Resilient fallback: lookup in full products list
     const allProducts = await fetchProducts();
     const matched = allProducts.find(
       (p) => String(p.id) === String(id) || p.slug === String(id)
@@ -95,7 +92,7 @@ export async function fetchProductById(id: string | number): Promise<Product | n
 
 export async function createProduct(token: string, data: Partial<Product>) {
   try {
-    let res = await fetch(`${BASE_URL}/products`, {
+    const res = await fetch(`${BASE_URL}/products`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -103,18 +100,6 @@ export async function createProduct(token: string, data: Partial<Product>) {
       },
       body: JSON.stringify(data)
     });
-
-    if (!res.ok) {
-      res = await fetch(`${BASE_URL}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify(data)
-      });
-    }
-
     return await res.json();
   } catch (err) {
     console.error('Error creating product:', err);
@@ -124,7 +109,7 @@ export async function createProduct(token: string, data: Partial<Product>) {
 
 export async function updateProduct(token: string, id: number, data: Partial<Product>) {
   try {
-    let res = await fetch(`${BASE_URL}/products/${id}`, {
+    const res = await fetch(`${BASE_URL}/products/${id}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -132,18 +117,6 @@ export async function updateProduct(token: string, id: number, data: Partial<Pro
       },
       body: JSON.stringify(data)
     });
-
-    if (!res.ok) {
-      res = await fetch(`${BASE_URL}/${id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify(data)
-      });
-    }
-
     return await res.json();
   } catch (err) {
     console.error('Error updating product:', err);
@@ -153,22 +126,78 @@ export async function updateProduct(token: string, id: number, data: Partial<Pro
 
 export async function deleteProduct(token: string, id: number) {
   try {
-    let res = await fetch(`${BASE_URL}/products/${id}`, {
+    const res = await fetch(`${BASE_URL}/products/${id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}` }
     });
-
-    if (!res.ok) {
-      res = await fetch(`${BASE_URL}/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
-      });
-    }
-
     return await res.json();
   } catch (err) {
     console.error('Error deleting product:', err);
     return { success: false, message: 'Server communication error' };
+  }
+}
+
+export async function uploadProductImage(token: string, file: File) {
+  try {
+    const formData = new FormData();
+    formData.append('image', file);
+
+    const res = await fetch(`${BASE_URL}/products/upload-image`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData
+    });
+
+    const json = await res.json();
+    if (json.success && json.data?.url) {
+      return { success: true, url: json.data.url };
+    }
+    return { success: false, message: json.message || 'Upload failed' };
+  } catch (err) {
+    console.error('Error uploading product image:', err);
+    return { success: false, message: 'Failed to upload photo from local disk' };
+  }
+}
+
+export async function updateOrderStatus(token: string, orderId: number, status: string) {
+  try {
+    const res = await fetch(`${BASE_URL}/orders/${orderId}/status`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ status })
+    });
+    return await res.json();
+  } catch (err) {
+    console.error('Error updating order status:', err);
+    return { success: false, message: 'Failed to update status' };
+  }
+}
+
+export async function trackOrder(query: string) {
+  try {
+    const res = await fetch(`${BASE_URL}/orders/track/${encodeURIComponent(query)}`, {
+      cache: 'no-store'
+    });
+    return await res.json();
+  } catch (err) {
+    console.error('Error tracking order:', err);
+    return { success: false, message: 'Could not connect to tracking server' };
+  }
+}
+
+export async function fetchUserOrders(token: string) {
+  try {
+    const res = await fetch(`${BASE_URL}/orders/user/my-orders`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store'
+    });
+    return await res.json();
+  } catch (err) {
+    console.error('Error fetching user orders:', err);
+    return { success: false, message: 'Could not retrieve orders' };
   }
 }
 
@@ -204,29 +233,5 @@ export async function placeOrder(orderData: {
   } catch (err) {
     console.error('Error placing order:', err);
     return { success: false, message: 'Could not connect to checkout service' };
-  }
-}
-
-export async function uploadProductImage(token: string, file: File): Promise<{ success: boolean; url?: string; message?: string }> {
-  try {
-    const formData = new FormData();
-    formData.append('image', file);
-
-    const res = await fetch(`${BASE_URL}/products/upload-image`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`
-      },
-      body: formData
-    });
-
-    const json = await res.json();
-    if (json.success && json.data?.url) {
-      return { success: true, url: json.data.url };
-    }
-    return { success: false, message: json.message || 'Upload failed' };
-  } catch (err) {
-    console.error('Error uploading product image:', err);
-    return { success: false, message: 'Failed to upload photo from local disk' };
   }
 }
