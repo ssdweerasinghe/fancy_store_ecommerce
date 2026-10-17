@@ -176,6 +176,38 @@ export async function updateOrderStatus(token: string, orderId: number, status: 
   }
 }
 
+// Soft-delete / cancel order (restores inventory)
+export async function deleteOrder(token: string, orderId: number) {
+  try {
+    const res = await fetch(`${BASE_URL}/orders/${orderId}`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+    return await res.json();
+  } catch (err) {
+    console.error('Error cancelling order:', err);
+    return { success: false, message: 'Failed to cancel order' };
+  }
+}
+
+// Hard-delete: Completely removes order and items from MySQL database
+export async function deleteOrderPermanently(token: string, orderId: number) {
+  try {
+    const res = await fetch(`${BASE_URL}/orders/${orderId}/permanent`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+    return await res.json();
+  } catch (err) {
+    console.error('Error permanently deleting order:', err);
+    return { success: false, message: 'Failed to delete order from database' };
+  }
+}
+
 export async function trackOrder(query: string) {
   try {
     const res = await fetch(`${BASE_URL}/orders/track/${encodeURIComponent(query)}`, {
@@ -216,6 +248,7 @@ export async function getRoutineRecommendation(skin_type: string, primary_concer
 }
 
 export async function placeOrder(orderData: {
+  user_id?: number | null;
   customer_name: string;
   customer_email: string;
   customer_phone: string;
@@ -229,14 +262,7 @@ export async function placeOrder(orderData: {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(orderData)
     });
-    const data = await res.json();
-    if (!res.ok || !data.success) {
-      return {
-        success: false,
-        message: data.message || 'Unable to place order. Please try again.'
-      };
-    }
-    return data;
+    return await res.json();
   } catch (err) {
     console.error('Error placing order:', err);
     return { success: false, message: 'Could not connect to checkout service' };

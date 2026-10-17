@@ -24,25 +24,32 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isCartHydrated, setIsCartHydrated] = useState(false);
 
   // Load cart from localStorage on mount
   useEffect(() => {
     try {
       const stored = localStorage.getItem('fancy_store_cart');
-      if (stored) setCart(JSON.parse(stored));
+      if (stored) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setCart(JSON.parse(stored));
+      }
     } catch (e) {
       console.error('Failed to load cart from localStorage', e);
+    } finally {
+      setIsCartHydrated(true);
     }
   }, []);
 
   // Sync cart changes to localStorage
   useEffect(() => {
+    if (!isCartHydrated) return;
     try {
       localStorage.setItem('fancy_store_cart', JSON.stringify(cart));
     } catch (e) {
       console.error('Failed to save cart to localStorage', e);
     }
-  }, [cart]);
+  }, [cart, isCartHydrated]);
 
   const addToCart = (product: Product) => {
     setCart((prev) => {

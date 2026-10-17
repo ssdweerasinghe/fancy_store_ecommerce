@@ -17,6 +17,17 @@ interface RoutineQuizModalProps {
   onClose: () => void;
 }
 
+interface RoutineStep {
+  step_number: number;
+  step_name: string;
+  product: Product;
+}
+
+interface RoutineRecommendation {
+  steps: RoutineStep[];
+  total_price: number | string;
+}
+
 export default function RoutineQuizModal({ isOpen, onClose }: RoutineQuizModalProps) {
   const { addToCart, setIsCartOpen } = useCart();
 
@@ -26,7 +37,7 @@ export default function RoutineQuizModal({ isOpen, onClose }: RoutineQuizModalPr
   const [texturePreference, setTexturePreference] = useState<string>('gel');
 
   const [loading, setLoading] = useState<boolean>(false);
-  const [recommendation, setRecommendation] = useState<any>(null);
+  const [recommendation, setRecommendation] = useState<RoutineRecommendation | null>(null);
 
   if (!isOpen) return null;
 
@@ -239,7 +250,7 @@ export default function RoutineQuizModal({ isOpen, onClose }: RoutineQuizModalPr
 
             {/* Routine Steps List */}
             <div className="space-y-3 mb-6 max-h-[380px] overflow-y-auto pr-1">
-              {recommendation?.steps?.map((st: any) => {
+              {recommendation?.steps?.map((st) => {
                 const img = getProductImage(st.product);
                 return (
                   <div

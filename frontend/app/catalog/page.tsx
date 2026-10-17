@@ -56,12 +56,21 @@ export default function CatalogPage() {
   }, []);
 
   useEffect(() => {
-    setLoading(true);
     fetchProducts(selectedCategory, selectedSkinType).then((data) => {
       setProducts(data);
       setLoading(false);
     });
   }, [selectedCategory, selectedSkinType]);
+
+  const handleCategoryChange = (category: string) => {
+    setLoading(true);
+    setSelectedCategory(category);
+  };
+
+  const handleSkinTypeChange = (skinType: string) => {
+    setLoading(true);
+    setSelectedSkinType(skinType);
+  };
 
   const filtered = useMemo(() => {
     if (!searchQuery.trim()) return products;
@@ -110,7 +119,7 @@ export default function CatalogPage() {
         {/* Categories Bar */}
         <div className="flex items-center gap-2 overflow-x-auto py-4 scrollbar-none">
           <button
-            onClick={() => setSelectedCategory('all')}
+            onClick={() => handleCategoryChange('all')}
             className={`px-4 py-2 rounded-full text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
               selectedCategory === 'all'
                 ? 'bg-[#1B382B] text-white shadow-xs'
@@ -122,7 +131,7 @@ export default function CatalogPage() {
           {categories.map((cat) => (
             <button
               key={cat.id}
-              onClick={() => setSelectedCategory(cat.slug)}
+              onClick={() => handleCategoryChange(cat.slug)}
               className={`inline-flex items-center px-4 py-2 rounded-full text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
                 selectedCategory === cat.slug
                   ? 'bg-[#1B382B] text-white shadow-xs'
@@ -143,7 +152,7 @@ export default function CatalogPage() {
           {['all', 'sensitive', 'dry', 'oily', 'aging', 'dehydrated'].map((type) => (
             <button
               key={type}
-              onClick={() => setSelectedSkinType(type)}
+              onClick={() => handleSkinTypeChange(type)}
               className={`px-3 py-1 rounded-lg capitalize font-medium transition cursor-pointer ${
                 selectedSkinType === type
                   ? 'bg-[#1B382B] text-white'

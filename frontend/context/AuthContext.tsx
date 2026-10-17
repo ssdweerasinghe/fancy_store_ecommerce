@@ -37,6 +37,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const storedUser = localStorage.getItem('fancy_user');
 
       if (storedToken && storedUser) {
+        // Restore persisted authentication after the server-rendered initial state.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setToken(storedToken);
         setUser(JSON.parse(storedUser));
       }

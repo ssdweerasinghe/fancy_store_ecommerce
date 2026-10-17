@@ -67,7 +67,7 @@ export default function LoginPage() {
 
   // Timer countdown
   useEffect(() => {
-    let interval: any = null;
+    let interval: ReturnType<typeof setInterval> | undefined;
     if (isPhoneOtpSent && otpTimer > 0) {
       interval = setInterval(() => setOtpTimer((prev) => prev - 1), 1000);
     }
@@ -224,9 +224,9 @@ export default function LoginPage() {
       } else {
         setErrorMsg(data.message);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setLoading(false);
-      setErrorMsg(err.message || 'Authentication error');
+      setErrorMsg(err instanceof Error ? err.message : 'Authentication error');
     }
   };
 
@@ -254,9 +254,9 @@ export default function LoginPage() {
       } else {
         setErrorMsg(data.message);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setLoading(false);
-      setErrorMsg(err.message || 'Registration failed');
+      setErrorMsg(err instanceof Error ? err.message : 'Registration failed');
     }
   };
 

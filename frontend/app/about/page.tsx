@@ -60,7 +60,7 @@ export default function AboutPage() {
         <div className="mt-16 bg-gradient-to-r from-[#142A20] to-[#1B382B] text-white rounded-3xl p-8 sm:p-12 shadow-xl border border-[#C5A059]/30">
           <h2 className="text-2xl sm:text-3xl font-serif font-bold mb-4">Our Commitment</h2>
           <p className="text-emerald-100/90 text-sm leading-relaxed max-w-3xl">
-            "Skincare is never one-size-fits-all. Fancy Store delivers consultative beauty directly to your doorstep, combining high-grade hydrogels, pure fruit essences, and verified daily regimens."
+            &quot;Skincare is never one-size-fits-all. Fancy Store delivers consultative beauty directly to your doorstep, combining high-grade hydrogels, pure fruit essences, and verified daily regimens.&quot;
           </p>
         </div>
       </main>

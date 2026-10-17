@@ -21,7 +21,9 @@ import {
   Sparkles,
   RefreshCw,
   UploadCloud,
-  FileImage
+  FileImage,
+  Ban,
+  FileDown
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { 
@@ -32,10 +34,32 @@ import {
   deleteProduct, 
   uploadProductImage,
   updateOrderStatus,
+  deleteOrder,
+  deleteOrderPermanently,
   Product, 
   Category 
 } from '@/services/api';
 import { getProductImage } from '@/app/catalog/page';
+
+interface AdminOrder {
+  id: number;
+  tracking_number?: string | null;
+  customer_name?: string | null;
+  name?: string | null;
+  customer_email?: string | null;
+  email?: string | null;
+  payment_method?: string;
+  total_amount: number | string;
+  created_at: string;
+  status: string;
+}
+
+interface AdminStats {
+  total_orders: number;
+  total_revenue: number | string;
+  low_stock_count: number;
+  recent_orders: AdminOrder[];
+}
 
 export default function AdminDashboardPage() {
   const { user, token, isAdmin, logout } = useAuth();
@@ -44,10 +68,9 @@ export default function AdminDashboardPage() {
 
   const [activeTab, setActiveTab] = useState<'inventory' | 'orders'>('inventory');
 
-  const [stats, setStats] = useState<any>(null);
+  const [stats, setStats] = useState<AdminStats | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
@@ -75,7 +98,6 @@ export default function AdminDashboardPage() {
 
   const loadData = async () => {
     if (!token) return;
-    setLoading(true);
 
     try {
       const [statsRes, catData, prodData] = await Promise.all([
@@ -86,13 +108,11 @@ export default function AdminDashboardPage() {
         fetchProducts()
       ]);
 
-      if (statsRes.success) setStats(statsRes.data);
+      if (statsRes.success) setStats(statsRes.data as AdminStats);
       setCategories(catData);
       setProducts(prodData);
     } catch (err) {
       console.error('Error loading admin data:', err);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -101,7 +121,9 @@ export default function AdminDashboardPage() {
       router.push('/admin/login');
       return;
     }
-    loadData();
+    // Load protected dashboard data after the authenticated state becomes available.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadData();
   }, [token, isAdmin, router]);
 
   const filteredProducts = useMemo(() => {
@@ -189,6 +211,37 @@ export default function AdminDashboardPage() {
       loadData();
     } else {
       alert(res.message || 'Could not update status');
+    }
+  };
+
+  // Cancel order (soft delete)
+  const handleCancelOrder = async (orderId: number, customerName: string) => {
+    if (!confirm(`Mark Order #${orderId} (${customerName}) as CANCELLED? This will replenish product inventory.`)) {
+      return;
+    }
+    if (!token) return;
+
+    const res = await deleteOrder(token, orderId);
+    if (res.success) {
+      loadData();
+    } else {
+      alert(res.message || 'Failed to cancel order');
+    }
+  };
+
+  // Hard delete from database
+  const handlePurgeOrder = async (orderId: number, customerName: string) => {
+    if (!confirm(`PERMANENT ACTION: Are you sure you want to completely remove Order #${orderId} (${customerName}) from the MySQL database? This action cannot be undone.`)) {
+      return;
+    }
+    if (!token) return;
+
+    const res = await deleteOrderPermanently(token, orderId);
+    if (res.success) {
+      alert(`Order #${orderId} permanently deleted from database.`);
+      loadData();
+    } else {
+      alert(res.message || 'Failed to remove order from database');
     }
   };
 
@@ -311,7 +364,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* Tab Controls & Add Action */}
+        {/* Tab Controls */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#E8EFE9] mb-8">
           <div className="flex items-center gap-2">
             <button
@@ -332,30 +385,30 @@ export default function AdminDashboardPage() {
                   : 'bg-white text-stone-600 border border-[#E8EFE9] hover:bg-stone-50'
               }`}
             >
-              Order Lifecycle Stream
+              Customer Order Stream & Status
             </button>
           </div>
 
-          {activeTab === 'inventory' && (
-            <div className="flex items-center gap-3">
-              <button
-                onClick={loadData}
-                title="Refresh Inventory"
-                className="p-3 bg-white border border-[#E8EFE9] hover:bg-stone-100 rounded-2xl text-stone-600 transition cursor-pointer"
-              >
-                <RefreshCw className="w-4 h-4" />
-              </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={loadData}
+              title="Refresh Data"
+              className="p-3 bg-white border border-[#E8EFE9] hover:bg-stone-100 rounded-2xl text-stone-600 transition cursor-pointer"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+            {activeTab === 'inventory' && (
               <button
                 onClick={handleOpenAddModal}
                 className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-[#C5A059] hover:bg-[#b08e4c] text-[#142A20] font-bold text-xs uppercase tracking-wider transition shadow-md cursor-pointer"
               >
                 <Plus className="w-4 h-4" /> Add New Product
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
-        {/* TAB 1: Inventory Table */}
+        {/* TAB 1: Inventory Management */}
         {activeTab === 'inventory' && (
           <div>
             <div className="bg-white p-4 rounded-3xl border border-[#E8EFE9] mb-6 flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -481,55 +534,119 @@ export default function AdminDashboardPage() {
           </div>
         )}
 
-        {/* TAB 2: Order Stream with Live Status Switcher */}
+        {/* TAB 2: Order Stream with Live Status Switcher, Cancel, and DB Removal */}
         {activeTab === 'orders' && (
           <div className="bg-white rounded-3xl border border-[#E8EFE9] p-6 shadow-xs">
-            <h2 className="text-xl font-serif font-bold text-[#161D1A] mb-4">Customer Order Stream & Status</h2>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+              <div>
+                <h2 className="text-xl font-serif font-bold text-[#161D1A]">Customer Order Stream & Status</h2>
+                <p className="text-xs text-stone-500 mt-0.5">
+                  Manage live dispatch phases, cancel customer orders, or permanently remove records from the database.
+                </p>
+              </div>
+            </div>
+
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-[#E8EFE9] text-stone-400 font-bold uppercase tracking-wider">
-                    <th className="pb-3 px-4">Reference</th>
+                    <th className="pb-3 px-4">Track Reference</th>
                     <th className="pb-3 px-4">Customer</th>
                     <th className="pb-3 px-4">Payment Method</th>
                     <th className="pb-3 px-4">Amount</th>
                     <th className="pb-3 px-4">Date</th>
                     <th className="pb-3 px-4">Status & Dispatch Phase</th>
+                    <th className="pb-3 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#F3F6F4]">
-                  {stats?.recent_orders?.map((ord: any) => (
-                    <tr key={ord.id} className="py-3 hover:bg-[#FBF9F5]/60 transition">
-                      <td className="py-3.5 px-4 font-mono font-bold text-[#1B382B]">#{ord.id}</td>
-                      <td className="py-3.5 px-4">
-                        <span className="font-bold block text-stone-800">{ord.customer_name}</span>
-                        <span className="text-stone-400 text-[11px]">{ord.customer_email}</span>
-                      </td>
-                      <td className="py-3.5 px-4 uppercase text-stone-600 font-medium">
-                        {ord.payment_method?.replace(/_/g, ' ')}
-                      </td>
-                      <td className="py-3.5 px-4 font-serif font-bold text-stone-900">
-                        LKR {Number(ord.total_amount).toFixed(2)}
-                      </td>
-                      <td className="py-3.5 px-4 text-stone-400 font-mono text-[11px]">
-                        {new Date(ord.created_at).toLocaleDateString()}
-                      </td>
-                      <td className="py-3.5 px-4">
-                        {/* Live Dropdown to Update Status */}
-                        <select
-                          value={ord.status}
-                          onChange={(e) => handleStatusChange(ord.id, e.target.value)}
-                          className="px-3 py-1.5 rounded-full font-bold text-[11px] border border-[#E8EFE9] bg-stone-50 text-stone-800 capitalize focus:outline-[#1B382B] cursor-pointer"
-                        >
-                          <option value="confirmed">Confirmed</option>
-                          <option value="processing">Processing</option>
-                          <option value="shipped">Shipped</option>
-                          <option value="delivered">Delivered</option>
-                          <option value="cancelled">Cancelled</option>
-                        </select>
+                  {!stats?.recent_orders || stats.recent_orders.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-stone-400">
+                        No orders recorded yet.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    stats.recent_orders.map((ord) => {
+                      const isCancelled = ord.status === 'cancelled';
+                      const customerName = ord.customer_name || ord.name || 'Customer';
+                      const customerEmail = ord.customer_email || ord.email || '';
+                      const trackRef = ord.tracking_number || ord.id;
+
+                      return (
+                        <tr key={ord.id} className={`py-3 transition ${isCancelled ? 'bg-rose-50/40 opacity-80' : 'hover:bg-[#FBF9F5]/60'}`}>
+                          <td className="py-3.5 px-4 font-mono font-bold text-[#1B382B]">
+                            <span className="block text-[11px] text-stone-800">{trackRef}</span>
+                            <span className="text-[10px] text-stone-400 font-normal">ID: #{ord.id}</span>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <span className="font-bold block text-stone-800">{customerName}</span>
+                            <span className="text-stone-400 text-[11px]">{customerEmail}</span>
+                          </td>
+                          <td className="py-3.5 px-4 uppercase text-stone-600 font-medium">
+                            {ord.payment_method?.replace(/_/g, ' ')}
+                          </td>
+                          <td className="py-3.5 px-4 font-serif font-bold text-stone-900">
+                            LKR {Number(ord.total_amount).toFixed(2)}
+                          </td>
+                          <td className="py-3.5 px-4 text-stone-400 font-mono text-[11px]">
+                            {new Date(ord.created_at).toLocaleDateString()}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <select
+                              value={ord.status}
+                              onChange={(e) => handleStatusChange(ord.id, e.target.value)}
+                              className={`px-3 py-1.5 rounded-full font-bold text-[11px] border capitalize focus:outline-[#1B382B] cursor-pointer ${
+                                isCancelled
+                                  ? 'bg-rose-100 text-rose-800 border-rose-300'
+                                  : ord.status === 'delivered'
+                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                  : 'bg-stone-50 text-stone-800 border-[#E8EFE9]'
+                              }`}
+                            >
+                              <option value="confirmed">Confirmed</option>
+                              <option value="processing">Processing</option>
+                              <option value="shipped">Shipped</option>
+                              <option value="delivered">Delivered</option>
+                              <option value="cancelled">Cancelled</option>
+                            </select>
+                          </td>
+                          <td className="py-3.5 px-4 text-right">
+                            <div className="inline-flex items-center gap-1.5">
+                              {/* Download PDF button */}
+                              <button
+                                onClick={() => window.open(`${BASE_URL}/orders/${ord.id}/invoice`, '_blank')}
+                                className="p-2 rounded-xl bg-stone-100 hover:bg-[#1B382B] hover:text-white text-stone-600 transition cursor-pointer"
+                                title="Download PDF Receipt"
+                              >
+                                <FileDown className="w-3.5 h-3.5 text-[#C5A059]" />
+                              </button>
+
+                              {/* Cancel Order (Soft delete) */}
+                              {!isCancelled && (
+                                <button
+                                  onClick={() => handleCancelOrder(ord.id, customerName)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-500 hover:text-white text-amber-800 text-[11px] font-bold transition cursor-pointer border border-amber-200"
+                                  title="Mark Cancelled & Replenish Stock"
+                                >
+                                  <Ban className="w-3.5 h-3.5" /> Cancel
+                                </button>
+                              )}
+
+                              {/* Permanent Remove from Database */}
+                              <button
+                                onClick={() => handlePurgeOrder(ord.id, customerName)}
+                                className="p-2 rounded-xl bg-rose-50 hover:bg-rose-600 hover:text-white text-rose-700 transition cursor-pointer border border-rose-200"
+                                title="Permanently Delete Order from Database"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
@@ -538,7 +655,7 @@ export default function AdminDashboardPage() {
 
       </main>
 
-      {/* Add / Edit Product Modal with Local File Upload */}
+      {/* Add / Edit Product Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#142A20]/65 backdrop-blur-xs p-4 overflow-y-auto">
           <div className="bg-[#FBF9F5] border border-[#E8EFE9] rounded-3xl max-w-2xl w-full p-6 sm:p-8 relative shadow-2xl my-8 animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">

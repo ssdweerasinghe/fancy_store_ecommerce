@@ -1,5 +1,5 @@
-import bcrypt from 'bcrypt';
 import pool from './db.js';
+import bcrypt from 'bcrypt';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -7,39 +7,33 @@ dotenv.config();
 async function seedAdmin() {
   const connection = await pool.getConnection();
   try {
-    console.log('⏳ Ensuring users table schema has role and phone columns...');
+    const adminEmail = 'admin@fancystore.lk';
+    const rawPass = 'Admin@Fancy2026';
+    const hashedPassword = await bcrypt.hash(rawPass, 10);
 
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        name VARCHAR(100) NOT NULL,
-        email VARCHAR(150) UNIQUE NOT NULL,
-        password VARCHAR(255) NOT NULL,
-        phone VARCHAR(30) NULL,
-        role ENUM('customer', 'admin') DEFAULT 'customer',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB;
-    `);
-
-    // Check if the admin account already exists
     const [existing] = await connection.query(
-      'SELECT id FROM users WHERE email = ?',
-      ['admin@fancystore.lk']
+      'SELECT id, role FROM users WHERE email = ?',
+      [adminEmail]
     );
 
-    if (existing.length === 0) {
-      const hashedPassword = await bcrypt.hash('Admin@Fancy2026', 10);
+    if (existing.length > 0) {
       await connection.query(
-        `INSERT INTO users (name, email, password, role) 
-         VALUES ('Store Administrator', 'admin@fancystore.lk', ?, 'admin')`,
-        [hashedPassword]
+        'UPDATE users SET password = ?, role = "admin" WHERE email = ?',
+        [hashedPassword, adminEmail]
       );
-      console.log('✅ Default Admin created: admin@fancystore.lk / Admin@Fancy2026');
+      console.log('✅ Existing admin updated with role: admin and active key.');
     } else {
-      console.log('ℹ️ Admin user already exists in the database.');
+      await connection.query(
+        `INSERT INTO users (name, email, password, role, is_email_verified) 
+         VALUES (?, ?, ?, 'admin', 1)`,
+        ['Fancy Store Staff', adminEmail, hashedPassword]
+      );
+      console.log('✅ Admin user created successfully.');
     }
-  } catch (error) {
-    console.error('❌ Failed seeding admin:', error);
+
+    console.log(`\nCredentials Ready:\nEmail: ${adminEmail}\nKey: ${rawPass}\n`);
+  } catch (err) {
+    console.error('❌ Error seeding admin:', err.message);
   } finally {
     connection.release();
     process.exit(0);

@@ -25,7 +25,12 @@ export default function AdminLoginPage() {
       const res = await fetch(`${BASE_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, require_admin: true })
+        body: JSON.stringify({
+          identifier: email.trim(),
+          email: email.trim(),
+          password,
+          require_admin: true
+        })
       });
       const data = await res.json();
 
@@ -35,8 +40,8 @@ export default function AdminLoginPage() {
 
       login(data.data.user, data.data.token);
       router.push('/admin');
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Authentication error');
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Authentication error');
     } finally {
       setLoading(false);
     }
@@ -79,7 +84,7 @@ export default function AdminLoginPage() {
             <div className="relative">
               <Mail className="w-4 h-4 text-emerald-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
-                type="email"
+                type="text"
                 required
                 placeholder="admin@fancystore.lk"
                 value={email}

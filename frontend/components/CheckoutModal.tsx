@@ -4,8 +4,6 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   X, 
-  Sparkles, 
-  ShieldCheck, 
   Truck, 
   CheckCircle2, 
   User, 
@@ -14,7 +12,8 @@ import {
   MapPin, 
   CreditCard,
   Banknote,
-  ArrowRight
+  ArrowRight,
+  FileDown
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useCart } from '@/context/CartContext';
@@ -36,12 +35,11 @@ interface CheckoutModalProps {
   isFromCart?: boolean;
 }
 
-interface OrderSuccess {
+interface OrderConfirmation {
   order_id: number;
+  tracking_number?: string | null;
   customer_name: string;
-  customer_email: string;
   total_amount: number | string;
-  payment_method: string;
 }
 
 export default function CheckoutModal({
@@ -53,6 +51,7 @@ export default function CheckoutModal({
   const router = useRouter();
   const { user } = useAuth();
   const { clearCart } = useCart();
+  const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
@@ -62,22 +61,16 @@ export default function CheckoutModal({
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  const [orderSuccess, setOrderSuccess] = useState<OrderSuccess | null>(null);
+  const [orderSuccess, setOrderSuccess] = useState<OrderConfirmation | null>(null);
 
-  const handleClose = () => {
-    setErrorMsg('');
-    setOrderSuccess(null);
-    onClose();
-  };
-
-  // Auto-fill all user details when authenticated
   useEffect(() => {
-    if (user) {
+    if (isOpen && user) {
+      // Prefill editable checkout fields from the signed-in account.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (user.name) setCustomerName(user.name);
       if (user.email) setCustomerEmail(user.email);
       if (user.phone) setCustomerPhone(user.phone);
 
-      // Assemble full Sri Lankan postal address
       const addressParts = [
         user.address_line1,
         user.town,
@@ -104,45 +97,43 @@ export default function CheckoutModal({
     setLoading(true);
     setErrorMsg('');
 
-    try {
-      const orderPayload = {
-        customer_name: customerName.trim(),
-        customer_email: customerEmail.trim(),
-        customer_phone: customerPhone.trim(),
-        shipping_address: shippingAddress.trim(),
-        payment_method: paymentMethod,
-        items: items.map((it) => ({
-          product_id: it.id,
-          quantity: it.quantity,
-          price: Number(it.price)
-        }))
-      };
+    const orderPayload = {
+      user_id: user?.id || null,
+      customer_name: customerName.trim(),
+      customer_email: customerEmail.trim(),
+      customer_phone: customerPhone.trim(),
+      shipping_address: shippingAddress.trim(),
+      payment_method: paymentMethod,
+      items: items.map((it) => ({
+        product_id: it.id,
+        quantity: it.quantity,
+        price: Number(it.price)
+      }))
+    };
 
-      const res = await placeOrder(orderPayload);
+    const res = await placeOrder(orderPayload);
+    setLoading(false);
 
-      if (res.success && res.data) {
-        setOrderSuccess(res.data);
-        if (isFromCart) {
-          clearCart();
-        }
-      } else {
-        setErrorMsg(res.message || 'Unable to place order. Please check all details.');
+    if (res.success && res.data) {
+      setOrderSuccess(res.data);
+      if (isFromCart) {
+        clearCart();
       }
-    } catch (error) {
-      console.error('Checkout submission failed:', error);
-      setErrorMsg('Could not connect to checkout. Please try again.');
-    } finally {
-      setLoading(false);
+    } else {
+      setErrorMsg(res.message || 'Unable to place order. Please check all details.');
     }
+  };
+
+  const handleDownloadPDF = (orderId: number) => {
+    window.open(`${BASE_URL}/orders/${orderId}/invoice`, '_blank');
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#142A20]/70 backdrop-blur-xs p-4 overflow-y-auto">
       <div className="bg-[#FBF9F5] border border-[#E8EFE9] rounded-3xl max-w-2xl w-full p-6 sm:p-8 relative shadow-2xl my-8 animate-in zoom-in-95 duration-200 max-h-[92vh] overflow-y-auto">
         
-        {/* Close Button */}
         <button
-          onClick={handleClose}
+          onClick={onClose}
           className="absolute top-5 right-5 text-stone-400 hover:text-[#161D1A] p-1 rounded-full hover:bg-stone-100 transition cursor-pointer"
         >
           <X className="w-5 h-5" />
@@ -150,7 +141,6 @@ export default function CheckoutModal({
 
         {!orderSuccess ? (
           <div>
-            {/* Header */}
             <div className="mb-6 flex items-center gap-3">
               <div className="w-10 h-10 rounded-2xl bg-[#E8EFE9] text-[#1B382B] flex items-center justify-center border border-[#C4D7C8]">
                 <Truck className="w-5 h-5 text-[#C5A059]" />
@@ -165,7 +155,6 @@ export default function CheckoutModal({
               </div>
             </div>
 
-            {/* Profile Auto-fill Banner */}
             {user && (
               <div className="mb-5 p-3 rounded-2xl bg-[#E8EFE9]/80 border border-[#C4D7C8] flex items-center justify-between text-xs text-[#1B382B]">
                 <div className="flex items-center gap-2">
@@ -181,14 +170,12 @@ export default function CheckoutModal({
             )}
 
             {errorMsg && (
-              <div role="alert" aria-live="assertive" className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-medium">
+              <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-medium">
                 {errorMsg}
               </div>
             )}
 
             <form onSubmit={handleSubmitOrder} className="space-y-4 text-xs">
-              
-              {/* Customer Information */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1">
@@ -242,7 +229,6 @@ export default function CheckoutModal({
                 </div>
               </div>
 
-              {/* Delivery Address */}
               <div>
                 <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1">
                   Delivery Destination Address (Sri Lanka) *
@@ -260,7 +246,6 @@ export default function CheckoutModal({
                 </div>
               </div>
 
-              {/* Payment Methods */}
               <div>
                 <label className="block font-bold text-stone-700 uppercase tracking-wider mb-1.5">
                   Select Payment Method
@@ -288,7 +273,7 @@ export default function CheckoutModal({
                         : 'border-[#E8EFE9] bg-white text-stone-600 hover:border-stone-300'
                     }`}
                   >
-                    <ShieldCheck className="w-4 h-4 mx-auto mb-1 text-emerald-700" />
+                    <CheckCircle2 className="w-4 h-4 mx-auto mb-1 text-emerald-700" />
                     <span className="block text-[11px] leading-tight">Bank Deposit</span>
                   </button>
 
@@ -307,7 +292,6 @@ export default function CheckoutModal({
                 </div>
               </div>
 
-              {/* Order Summary & Pricing */}
               <div className="mt-4 p-4 rounded-2xl bg-white border border-[#E8EFE9] space-y-2">
                 <div className="flex items-center justify-between text-stone-500 text-[11px]">
                   <span>Items Enclosed ({items.reduce((s, i) => s + i.quantity, 0)})</span>
@@ -325,7 +309,6 @@ export default function CheckoutModal({
                 </div>
               </div>
 
-              {/* Submit CTA */}
               <button
                 type="submit"
                 disabled={loading}
@@ -338,7 +321,6 @@ export default function CheckoutModal({
             </form>
           </div>
         ) : (
-          /* Order Placement Success View */
           <div className="text-center py-6">
             <div className="w-16 h-16 rounded-3xl bg-[#E8EFE9] text-[#1B382B] flex items-center justify-center mx-auto mb-4 border border-[#C4D7C8]">
               <CheckCircle2 className="w-8 h-8 text-emerald-700" />
@@ -351,42 +333,47 @@ export default function CheckoutModal({
               Thank You, {orderSuccess.customer_name}!
             </h3>
             <p className="text-xs text-stone-500 mt-2 max-w-md mx-auto leading-relaxed">
-              Your botanical order <strong>#{orderSuccess.order_id}</strong> is placed. An itemized invoice has been dispatched to <strong>{orderSuccess.customer_email}</strong>.
+              Your botanical order is placed. Your official live tracking number is below:
             </p>
 
-            <div className="my-6 p-4 rounded-2xl bg-white border border-[#E8EFE9] max-w-sm mx-auto text-left text-xs space-y-1.5">
-              <div className="flex justify-between">
-                <span className="text-stone-400">Reference:</span>
-                <span className="font-mono font-bold text-[#1B382B]">#{orderSuccess.order_id}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-stone-400">Total Billed:</span>
-                <span className="font-serif font-bold text-stone-900">
-                  LKR {Number(orderSuccess.total_amount).toFixed(2)}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-stone-400">Payment:</span>
-                <span className="capitalize text-stone-700">
-                  {orderSuccess.payment_method?.replace(/_/g, ' ')}
-                </span>
-              </div>
+            {/* Date-Time Tracking Number Banner */}
+            <div className="my-5 p-4 rounded-2xl bg-[#E8EFE9] border border-[#C4D7C8] max-w-md mx-auto text-center">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-stone-500 block">
+                Official Tracking Number
+              </span>
+              <span className="text-2xl font-mono font-extrabold text-[#1B382B] tracking-wider block mt-1">
+                {orderSuccess.tracking_number || orderSuccess.order_id}
+              </span>
+              <span className="text-[11px] text-stone-400 block mt-1">
+                Order ID: #{orderSuccess.order_id} • Total: LKR {Number(orderSuccess.total_amount).toFixed(2)}
+              </span>
+            </div>
+
+            <div className="mb-6">
+              <button
+                type="button"
+                onClick={() => handleDownloadPDF(orderSuccess.order_id)}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-[#C5A059] hover:bg-[#b08e4c] text-[#142A20] font-bold text-xs uppercase tracking-wider transition shadow-md cursor-pointer"
+              >
+                <FileDown className="w-4 h-4" />
+                <span>Download Order Receipt & Protocol (PDF)</span>
+              </button>
             </div>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
               <button
                 type="button"
                 onClick={() => {
-                  handleClose();
+                  onClose();
                   router.push(`/track`);
                 }}
                 className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-[#1B382B] text-white text-xs font-bold uppercase tracking-wider hover:bg-[#142A20] transition cursor-pointer"
               >
-                Track Dispatch Status
+                Go to Tracker
               </button>
               <button
                 type="button"
-                onClick={handleClose}
+                onClick={onClose}
                 className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-white border border-[#E8EFE9] text-stone-600 text-xs font-bold uppercase tracking-wider hover:bg-stone-50 transition cursor-pointer"
               >
                 Continue Browsing

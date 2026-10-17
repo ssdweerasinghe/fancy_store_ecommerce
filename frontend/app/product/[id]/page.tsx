@@ -43,6 +43,8 @@ export default function ProductDetailsPage() {
     if (!productId) return;
 
     let isMounted = true;
+    // Reset the loading view when navigation changes the product ID.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
 
     const loadProductData = async () => {

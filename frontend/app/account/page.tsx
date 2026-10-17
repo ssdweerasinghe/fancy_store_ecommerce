@@ -14,16 +14,30 @@ import {
   ArrowRight,
   Truck,
   MapPin,
-  CheckCircle2
+  FileDown,
+  Copy,
+  Check
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { fetchUserOrders } from '@/services/api';
 
+interface UserOrder {
+  id: number;
+  tracking_number?: string | null;
+  status: string;
+  created_at: string;
+  items_count: number;
+  total_amount: number | string;
+}
+
 export default function AccountPage() {
   const { user, token, logout } = useAuth();
   const router = useRouter();
-  const [orders, setOrders] = useState<any[]>([]);
+  const [orders, setOrders] = useState<UserOrder[]>([]);
   const [loading, setLoading] = useState(true);
+  const [copiedTrack, setCopiedTrack] = useState<string | null>(null);
+
+  const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
   useEffect(() => {
     if (!token) {
@@ -36,6 +50,16 @@ export default function AccountPage() {
       setLoading(false);
     });
   }, [token, router]);
+
+  const handleDownloadPDF = (orderId: number) => {
+    window.open(`${BASE_URL}/orders/${orderId}/invoice`, '_blank');
+  };
+
+  const handleCopyTrackNo = (trackNo: string) => {
+    navigator.clipboard.writeText(trackNo);
+    setCopiedTrack(trackNo);
+    setTimeout(() => setCopiedTrack(null), 2000);
+  };
 
   if (!user) return null;
 
@@ -70,7 +94,6 @@ export default function AccountPage() {
               )}
             </div>
 
-            {/* Address Details */}
             {user.town && (
               <div className="pt-3 border-t border-[#F3F6F4] text-xs text-stone-600 space-y-1">
                 <span className="text-[10px] uppercase font-bold text-[#C5A059] block">
@@ -138,25 +161,90 @@ export default function AccountPage() {
               </div>
             ) : (
               <div className="divide-y divide-[#F3F6F4]">
-                {orders.map((ord) => (
-                  <div key={ord.id} className="py-4 flex items-center justify-between text-xs">
-                    <div>
-                      <span className="font-mono font-bold text-[#1B382B]">#{ord.id}</span>
-                      <span className="text-stone-400 text-[11px] block mt-0.5">
-                        {new Date(ord.created_at).toLocaleDateString()} • {ord.items_count} item(s)
-                      </span>
-                    </div>
+                {orders.map((ord) => {
+                  const isCancelled = ord.status === 'cancelled';
+                  const trackNo = ord.tracking_number || String(ord.id);
+                  const isCopied = copiedTrack === trackNo;
 
-                    <div className="text-right">
-                      <span className="font-serif font-bold text-[#161D1A] block">
-                        LKR {Number(ord.total_amount).toFixed(2)}
-                      </span>
-                      <span className="inline-block mt-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold capitalize bg-[#E8EFE9] text-[#1B382B]">
-                        {ord.status}
-                      </span>
+                  return (
+                    <div key={ord.id} className="py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs">
+                      
+                      {/* Left Side: Order identifiers and date */}
+                      <div className="space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[10px] uppercase font-bold text-[#C5A059] tracking-wider">
+                            Track No:
+                          </span>
+                          <span className="font-mono font-bold text-sm text-[#1B382B] bg-[#E8EFE9] px-2 py-0.5 rounded-md">
+                            {trackNo}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyTrackNo(trackNo)}
+                            className="p-1 rounded-md bg-stone-100 hover:bg-stone-200 text-stone-600 transition cursor-pointer"
+                            title="Copy Tracking Number"
+                          >
+                            {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                          </button>
+
+                          {isCancelled && (
+                            <span className="px-2 py-0.5 rounded-md bg-rose-100 text-rose-800 text-[10px] font-bold uppercase">
+                              Cancelled
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="text-stone-400 text-[11px] flex items-center gap-2">
+                          <span>Order Ref: #{ord.id}</span>
+                          <span>•</span>
+                          <span>{new Date(ord.created_at).toLocaleDateString()}</span>
+                          <span>•</span>
+                          <span>{ord.items_count} item(s)</span>
+                        </div>
+                      </div>
+
+                      {/* Right Side: Pricing, Status Badge & Actions */}
+                      <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
+                        <div className="text-left sm:text-right">
+                          <span className="font-serif font-bold text-stone-900 text-sm block">
+                            LKR {Number(ord.total_amount).toFixed(2)}
+                          </span>
+                          <span
+                            className={`inline-block mt-0.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold capitalize ${
+                              isCancelled
+                                ? 'bg-rose-100 text-rose-800'
+                                : 'bg-[#E8EFE9] text-[#1B382B]'
+                            }`}
+                          >
+                            {ord.status}
+                          </span>
+                        </div>
+
+                        {/* Action buttons */}
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadPDF(ord.id)}
+                            className="p-2.5 rounded-xl bg-stone-100 hover:bg-[#1B382B] hover:text-white text-stone-700 transition cursor-pointer border border-stone-200"
+                            title="Download PDF Receipt"
+                          >
+                            <FileDown className="w-4 h-4 text-[#C5A059]" />
+                          </button>
+
+                          <Link
+                            href={`/track?ref=${trackNo}`}
+                            className="p-2.5 rounded-xl bg-[#E8EFE9] hover:bg-[#d8e4da] text-[#1B382B] transition cursor-pointer border border-[#C4D7C8]"
+                            title="Live Courier Status"
+                          >
+                            <Truck className="w-4 h-4" />
+                          </Link>
+                        </div>
+
+                      </div>
+
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
