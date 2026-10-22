@@ -1,3 +1,5 @@
+import { http } from './httpClient';
+
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
 export interface Product {
@@ -27,10 +29,7 @@ export interface Category {
 
 export async function fetchCategories(): Promise<Category[]> {
   try {
-    let res = await fetch(`${BASE_URL}/categories`, { cache: 'no-store' });
-    if (!res.ok) {
-      res = await fetch(`${BASE_URL}/products/categories`, { cache: 'no-store' });
-    }
+    const res = await http('/categories', { cache: 'no-store' });
     const json = await res.json();
     return json.success && Array.isArray(json.data) ? json.data : [];
   } catch (err) {
@@ -44,14 +43,9 @@ export async function fetchProducts(category?: string, skinType?: string): Promi
     const params = new URLSearchParams();
     if (category && category !== 'all') params.append('category', category);
     if (skinType && skinType !== 'all') params.append('skin_type', skinType);
-
     const qs = params.toString() ? `?${params.toString()}` : '';
 
-    let res = await fetch(`${BASE_URL}/products${qs}`, { cache: 'no-store' });
-    if (!res.ok) {
-      res = await fetch(`${BASE_URL}${qs}`, { cache: 'no-store' });
-    }
-
+    const res = await http(`/products${qs}`, { cache: 'no-store' });
     const json = await res.json();
     return json.success && Array.isArray(json.data) ? json.data : [];
   } catch (err) {
@@ -62,188 +56,115 @@ export async function fetchProducts(category?: string, skinType?: string): Promi
 
 export async function fetchProductById(id: string | number): Promise<Product | null> {
   try {
-    let res = await fetch(`${BASE_URL}/products/${id}`, { cache: 'no-store' });
+    const res = await http(`/products/${id}`, { cache: 'no-store' });
     if (res.ok) {
       const json = await res.json();
       if (json.success && json.data) return json.data;
     }
-
-    res = await fetch(`${BASE_URL}/${id}`, { cache: 'no-store' });
-    if (res.ok) {
-      const json = await res.json();
-      if (json.success && json.data) return json.data;
-    }
-
-    const allProducts = await fetchProducts();
-    const matched = allProducts.find(
-      (p) => String(p.id) === String(id) || p.slug === String(id)
-    );
-    return matched || null;
-  } catch (err) {
-    console.error(`Error fetching product ${id}:`, err);
-    try {
-      const allProducts = await fetchProducts();
-      return allProducts.find((p) => String(p.id) === String(id)) || null;
-    } catch {
-      return null;
-    }
+    const all = await fetchProducts();
+    return all.find((p) => String(p.id) === String(id) || p.slug === String(id)) || null;
+  } catch {
+    return null;
   }
 }
 
-export async function createProduct(token: string, data: Partial<Product>) {
+export async function createProduct(token: string | null, data: Partial<Product>) {
   try {
-    const res = await fetch(`${BASE_URL}/products`, {
+    const res = await http('/products', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
     return await res.json();
-  } catch (err) {
-    console.error('Error creating product:', err);
+  } catch {
     return { success: false, message: 'Server communication error' };
   }
 }
 
-export async function updateProduct(token: string, id: number, data: Partial<Product>) {
+export async function updateProduct(token: string | null, id: number, data: Partial<Product>) {
   try {
-    const res = await fetch(`${BASE_URL}/products/${id}`, {
+    const res = await http(`/products/${id}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
     return await res.json();
-  } catch (err) {
-    console.error('Error updating product:', err);
+  } catch {
     return { success: false, message: 'Server communication error' };
   }
 }
 
-export async function deleteProduct(token: string, id: number) {
+export async function deleteProduct(token: string | null, id: number) {
   try {
-    const res = await fetch(`${BASE_URL}/products/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const res = await http(`/products/${id}`, { method: 'DELETE' });
     return await res.json();
-  } catch (err) {
-    console.error('Error deleting product:', err);
+  } catch {
     return { success: false, message: 'Server communication error' };
   }
 }
 
-export async function uploadProductImage(token: string, file: File) {
+export async function uploadProductImage(token: string | null, file: File) {
   try {
     const formData = new FormData();
     formData.append('image', file);
 
-    const res = await fetch(`${BASE_URL}/products/upload-image`, {
+    const res = await http('/products/upload-image', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData
+      body: formData,
     });
-
     const json = await res.json();
     if (json.success && json.data?.url) {
       return { success: true, url: json.data.url };
     }
     return { success: false, message: json.message || 'Upload failed' };
-  } catch (err) {
-    console.error('Error uploading product image:', err);
-    return { success: false, message: 'Failed to upload photo from local disk' };
+  } catch {
+    return { success: false, message: 'Failed to upload photo' };
   }
 }
 
-export async function updateOrderStatus(token: string, orderId: number, status: string) {
+export async function updateOrderStatus(token: string | null, orderId: number, status: string) {
   try {
-    const res = await fetch(`${BASE_URL}/orders/${orderId}/status`, {
+    const res = await http(`/orders/${orderId}/status`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify({ status })
+      body: JSON.stringify({ status }),
     });
     return await res.json();
-  } catch (err) {
-    console.error('Error updating order status:', err);
+  } catch {
     return { success: false, message: 'Failed to update status' };
   }
 }
 
-// Soft-delete / cancel order (restores inventory)
-export async function deleteOrder(token: string, orderId: number) {
+export async function deleteOrder(token: string | null, orderId: number) {
   try {
-    const res = await fetch(`${BASE_URL}/orders/${orderId}`, {
-      method: 'DELETE',
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    });
+    const res = await http(`/orders/${orderId}`, { method: 'DELETE' });
     return await res.json();
-  } catch (err) {
-    console.error('Error cancelling order:', err);
+  } catch {
     return { success: false, message: 'Failed to cancel order' };
   }
 }
 
-// Hard-delete: Completely removes order and items from MySQL database
-export async function deleteOrderPermanently(token: string, orderId: number) {
+export async function deleteOrderPermanently(token: string | null, orderId: number) {
   try {
-    const res = await fetch(`${BASE_URL}/orders/${orderId}/permanent`, {
-      method: 'DELETE',
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    });
+    const res = await http(`/orders/${orderId}/permanent`, { method: 'DELETE' });
     return await res.json();
-  } catch (err) {
-    console.error('Error permanently deleting order:', err);
+  } catch {
     return { success: false, message: 'Failed to delete order from database' };
   }
 }
 
 export async function trackOrder(query: string) {
   try {
-    const res = await fetch(`${BASE_URL}/orders/track/${encodeURIComponent(query)}`, {
-      cache: 'no-store'
-    });
+    const res = await http(`/orders/track/${encodeURIComponent(query)}`, { cache: 'no-store' });
     return await res.json();
-  } catch (err) {
-    console.error('Error tracking order:', err);
+  } catch {
     return { success: false, message: 'Could not connect to tracking server' };
   }
 }
 
-export async function fetchUserOrders(token: string) {
+export async function fetchUserOrders(token?: string | null) {
   try {
-    const res = await fetch(`${BASE_URL}/orders/user/my-orders`, {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store'
-    });
+    const res = await http('/orders/user/my-orders', { cache: 'no-store' });
     return await res.json();
-  } catch (err) {
-    console.error('Error fetching user orders:', err);
+  } catch {
     return { success: false, message: 'Could not retrieve orders' };
-  }
-}
-
-export async function getRoutineRecommendation(skin_type: string, primary_concern: string) {
-  try {
-    const res = await fetch(`${BASE_URL}/routine/recommend`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ skin_type, primary_concern })
-    });
-    return await res.json();
-  } catch (err) {
-    console.error('Error getting recommendations:', err);
-    return { success: false, message: 'Could not connect to server' };
   }
 }
 
@@ -257,14 +178,55 @@ export async function placeOrder(orderData: {
   items: { product_id: number; quantity: number; price: number }[];
 }) {
   try {
-    const res = await fetch(`${BASE_URL}/orders/checkout`, {
+    const res = await http('/orders/checkout', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(orderData)
+      body: JSON.stringify(orderData),
+    });
+    return await res.json();
+  } catch {
+    return { success: false, message: 'Could not connect to checkout service' };
+  }
+}
+
+export async function getRoutineRecommendation(skin_type: string, primary_concern: string) {
+  try {
+    const res = await http('/routine/recommend', {
+      method: 'POST',
+      body: JSON.stringify({ skin_type, primary_concern }),
     });
     return await res.json();
   } catch (err) {
-    console.error('Error placing order:', err);
-    return { success: false, message: 'Could not connect to checkout service' };
+    console.error('Error getting recommendations:', err);
+    return { success: false, message: 'Could not connect to recommendation engine' };
+  }
+}
+
+export async function googleLoginApi(credentialToken: string) {
+  try {
+    const res = await http('/auth/google', {
+      method: 'POST',
+      body: JSON.stringify({ token: credentialToken }),
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, message: err.message || 'Google authentication failed' };
+  }
+}
+
+export async function checkSessionApi() {
+  try {
+    const res = await http('/auth/me');
+    return await res.json();
+  } catch {
+    return { success: false, data: null };
+  }
+}
+
+export async function logoutApi() {
+  try {
+    const res = await http('/auth/logout', { method: 'POST' });
+    return await res.json();
+  } catch {
+    return { success: true };
   }
 }

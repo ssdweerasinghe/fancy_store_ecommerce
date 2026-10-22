@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Playfair_Display, Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
+import { GoogleOAuthProvider } from '@react-oauth/google';
 import { AuthProvider } from '@/context/AuthContext';
 import { CartProvider } from '@/context/CartContext';
 import { ThemeProvider } from '@/context/ThemeContext';
@@ -29,6 +30,8 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
+
   return (
     <html
       lang="en"
@@ -36,7 +39,6 @@ export default function RootLayout({
       className={`${serifFont.variable} ${sansFont.variable}`}
     >
       <head>
-        {/* Anti-flicker script */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
@@ -59,14 +61,16 @@ export default function RootLayout({
         suppressHydrationWarning={true}
         className="font-sans antialiased bg-[#FBF9F5] text-[#161D1A] dark:bg-[#0E1A14] dark:text-[#EAE6DF] transition-colors duration-200"
       >
-        <ThemeProvider>
-          <AuthProvider>
-            <CartProvider>
-              {children}
-              <CartDrawer />
-            </CartProvider>
-          </AuthProvider>
-        </ThemeProvider>
+        <GoogleOAuthProvider clientId={googleClientId}>
+          <ThemeProvider>
+            <AuthProvider>
+              <CartProvider>
+                {children}
+                <CartDrawer />
+              </CartProvider>
+            </AuthProvider>
+          </ThemeProvider>
+        </GoogleOAuthProvider>
       </body>
     </html>
   );

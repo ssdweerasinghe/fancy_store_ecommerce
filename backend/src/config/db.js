@@ -3,11 +3,13 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+const databaseName = process.env.DB_NAME || 'fancy_store_db';
+
 const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'fancy_store_db',
+  database: databaseName,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
@@ -17,7 +19,7 @@ const pool = mysql.createPool({
 export const testDbConnection = async () => {
   try {
     const connection = await pool.getConnection();
-    console.log('✅ Connected to MySQL Database (fancy_store_db)');
+    console.log(`✅ Connected to MySQL Database (${databaseName})`);
     connection.release();
   } catch (error) {
     console.error('❌ Database connection failed:', error.message);

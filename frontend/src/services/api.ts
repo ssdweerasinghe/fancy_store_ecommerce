@@ -1,66 +1,69 @@
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+import axios from 'axios';
 
-export interface Product {
-  id: number;
-  category_id: number;
-  category_name: string;
-  category_slug: string;
-  brand: string;
-  name: string;
-  slug: string;
-  flavor_or_type: string;
-  volume_or_weight: string;
-  price: string | number;
-  stock_quantity: number;
-  target_skin_type: string;
-  benefits: string;
-  key_ingredients: string;
-  image_url: string | null;
-}
+const api = axios.create({
+  baseURL: 'http://localhost:5000/api',
+  withCredentials: true, // Automatically sends and stores httpOnly cookies
+});
 
-export interface Category {
-  id: number;
-  name: string;
-  slug: string;
-  description: string;
-}
+let isRefreshing = false;
+let failedQueue = [];
 
-export async function fetchCategories(): Promise<Category[]> {
-  try {
-    const res = await fetch(`${BASE_URL}/categories`, { cache: 'no-store' });
-    const json = await res.json();
-    return json.success ? json.data : [];
-  } catch (err) {
-    console.error('Error fetching categories:', err);
-    return [];
+const processQueue = (error) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve();
+    }
+  });
+  failedQueue = [];
+};
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+
+    // Check for expired access token (401)
+    if (
+      error.response?.status === 401 &&
+      !originalRequest._retry &&
+      !originalRequest.url.includes('/auth/refresh') &&
+      !originalRequest.url.includes('/auth/google')
+    ) {
+      if (isRefreshing) {
+        // Queue parallel requests while refresh is executing
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        })
+          .then(() => api(originalRequest))
+          .catch((err) => Promise.reject(err));
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      try {
+        // Call refresh endpoint; browser includes refresh_token cookie automatically
+        await api.post('/auth/refresh');
+
+        isRefreshing = false;
+        processQueue(null);
+
+        // Replay original request with updated access_token cookie
+        return api(originalRequest);
+      } catch (refreshError) {
+        isRefreshing = false;
+        processQueue(refreshError);
+
+        // Refresh failed (token revoked/expired) -> trigger re-authentication
+        window.dispatchEvent(new Event('auth:logout'));
+        return Promise.reject(refreshError);
+      }
+    }
+
+    return Promise.reject(error);
   }
-}
+);
 
-export async function fetchProducts(category?: string, skinType?: string): Promise<Product[]> {
-  try {
-    const params = new URLSearchParams();
-    if (category && category !== 'all') params.append('category', category);
-    if (skinType && skinType !== 'all') params.append('skin_type', skinType);
-
-    const res = await fetch(`${BASE_URL}/products?${params.toString()}`, { cache: 'no-store' });
-    const json = await res.json();
-    return json.success ? json.data : [];
-  } catch (err) {
-    console.error('Error fetching products:', err);
-    return [];
-  }
-}
-
-export async function getRoutineRecommendation(skin_type: string, primary_concern: string) {
-  try {
-    const res = await fetch(`${BASE_URL}/routine/recommend`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ skin_type, primary_concern })
-    });
-    return await res.json();
-  } catch (err) {
-    console.error('Error getting recommendations:', err);
-    return { success: false, message: 'Could not connect to server' };
-  }
-}
+export default api;

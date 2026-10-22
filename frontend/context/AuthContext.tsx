@@ -1,82 +1,95 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { checkSessionApi, logoutApi, googleLoginApi } from '@/services/api';
 
-export interface User {
+interface User {
   id: number;
   name: string;
-  email?: string | null;
-  phone?: string | null;
+  email: string;
+  phone?: string;
+  role: string;
   avatar_url?: string | null;
-  role: 'customer' | 'admin';
-  address_line1?: string | null;
-  town?: string | null;
-  district?: string | null;
-  province?: string | null;
-  postal_code?: string | null;
+  address_line1?: string;
+  town?: string;
+  district?: string;
+  province?: string;
+  postal_code?: string;
 }
 
 interface AuthContextType {
   user: User | null;
   token: string | null;
   isAdmin: boolean;
-  login: (user: User, token: string) => void;
-  logout: () => void;
-  updateUser: (updatedUser: Partial<User>) => void;
+  login: (userData: User, token?: string) => void;
+  loginWithGoogle: (credential: string) => Promise<{ success: boolean; message?: string }>;
+  logout: () => Promise<void>;
+  loading: boolean;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const AuthContext = createContext<AuthContextType>({
+  user: null,
+  token: null,
+  isAdmin: false,
+  login: () => {},
+  loginWithGoogle: async () => ({ success: false }),
+  logout: async () => {},
+  loading: true,
+});
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
+  // Check HTTP-only cookie session on initial mount
   useEffect(() => {
-    try {
-      const storedToken = localStorage.getItem('fancy_token');
-      const storedUser = localStorage.getItem('fancy_user');
-
-      if (storedToken && storedUser) {
-        // Restore persisted authentication after the server-rendered initial state.
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setToken(storedToken);
-        setUser(JSON.parse(storedUser));
+    async function verifyUserSession() {
+      try {
+        const res = await checkSessionApi();
+        if (res.success && res.data?.user) {
+          setUser(res.data.user);
+        } else {
+          setUser(null);
+        }
+      } catch (err) {
+        setUser(null);
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      console.error('Failed restoring auth state:', err);
     }
+    verifyUserSession();
   }, []);
 
-  const login = (newUser: User, newToken: string) => {
-    setUser(newUser);
-    setToken(newToken);
-    localStorage.setItem('fancy_token', newToken);
-    localStorage.setItem('fancy_user', JSON.stringify(newUser));
+  const login = (userData: User) => {
+    setUser(userData);
   };
 
-  const logout = () => {
+  const loginWithGoogle = async (credential: string) => {
+    const res = await googleLoginApi(credential);
+    if (res.success && res.data?.user) {
+      setUser(res.data.user);
+      return { success: true };
+    }
+    return { success: false, message: res.message || 'Google login failed' };
+  };
+
+  const logout = async () => {
+    await logoutApi();
     setUser(null);
-    setToken(null);
-    localStorage.removeItem('fancy_token');
-    localStorage.removeItem('fancy_user');
   };
 
-  const updateUser = (updatedUser: Partial<User>) => {
-    if (!user) return;
-    const merged = { ...user, ...updatedUser };
-    setUser(merged);
-    localStorage.setItem('fancy_user', JSON.stringify(merged));
-  };
+  const isAdmin = user?.role === 'admin';
 
   return (
     <AuthContext.Provider
       value={{
         user,
-        token,
-        isAdmin: user?.role === 'admin',
+        token: user ? 'cookie-session' : null,
+        isAdmin,
         login,
+        loginWithGoogle,
         logout,
-        updateUser
+        loading,
       }}
     >
       {children}
@@ -84,10 +97,4 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-}
+export const useAuth = () => useContext(AuthContext);

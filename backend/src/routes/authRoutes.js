@@ -1,404 +1,338 @@
 import express from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
+import { OAuth2Client } from 'google-auth-library';
 import pool from '../config/db.js';
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'fancy_store_super_secret_key_2026';
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-// Middleware to verify session token
-export const verifyToken = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'access_secret_fallback_key';
+const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'refresh_secret_fallback_key';
+const IS_PROD = process.env.NODE_ENV === 'production';
+
+// Helper to hash refresh tokens before database storage
+function hashToken(rawToken) {
+  return crypto.createHash('sha256').update(rawToken).digest('hex');
+}
+
+// Issue Access and Refresh Tokens into Secure HTTP-only cookies
+async function issueAuthCookies(res, user) {
+  const tokenPayload = {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role || 'customer'
+  };
+
+  // 1. Short-lived Access Token (15 minutes)
+  const accessToken = jwt.sign(tokenPayload, ACCESS_SECRET, { expiresIn: '15m' });
+
+  // 2. Long-lived Refresh Token (7 days)
+  const refreshToken = jwt.sign({ id: user.id }, REFRESH_SECRET, { expiresIn: '7d' });
+
+  const tokenHashValue = hashToken(refreshToken);
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+  // 3. Persist Refresh Token to MySQL
+  await pool.query(
+    `INSERT INTO refresh_tokens (user_id, token, token_hash, expires_at) VALUES (?, ?, ?, ?)`,
+    [user.id, refreshToken, tokenHashValue, expiresAt]
+  );
+
+  // 4. Attach Access Token Cookie (15 mins)
+  res.cookie('access_token', accessToken, {
+    httpOnly: true,
+    secure: IS_PROD,
+    sameSite: 'lax',
+    maxAge: 15 * 60 * 1000,
+    path: '/'
+  });
+
+  // 5. Attach Refresh Token Cookie (7 days)
+  res.cookie('refresh_token', refreshToken, {
+    httpOnly: true,
+    secure: IS_PROD,
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    path: '/'
+  });
+
+  return { accessToken, refreshToken };
+}
+
+// Middleware: Authenticate via HTTP-only Cookie OR Authorization Header
+export function verifyToken(req, res, next) {
+  const token = req.cookies?.access_token || (req.headers.authorization && req.headers.authorization.split(' ')[1]);
+
+  if (!token) {
     return res.status(401).json({ success: false, message: 'Authentication required' });
   }
 
-  const token = authHeader.split(' ')[1];
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+  jwt.verify(token, ACCESS_SECRET, (err, decoded) => {
+    if (err) {
+      // 403 status code triggers client interceptor to call /api/auth/refresh
+      return res.status(403).json({ success: false, message: 'Token expired or invalid' });
+    }
     req.user = decoded;
     next();
-  } catch (err) {
-    return res.status(403).json({ success: false, message: 'Invalid or expired session token' });
-  }
-};
+  });
+}
 
-// Middleware to verify Admin role
-export const verifyAdmin = (req, res, next) => {
+// Middleware: Admin Authorization
+export function verifyAdmin(req, res, next) {
   verifyToken(req, res, () => {
-    if (req.user && req.user.role === 'admin') {
+    if (req.user?.role === 'admin') {
       next();
     } else {
-      res.status(403).json({ success: false, message: 'Access denied: Administrator privileges required' });
+      res.status(403).json({ success: false, message: 'Admin access required' });
     }
   });
-};
+}
 
-const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
-
-// 1. SEND OTP
-router.post('/send-otp', async (req, res) => {
+// 1. POST /api/auth/google (Google One-Tap / Button Login with HTTP-only Cookies)
+router.post('/google', async (req, res) => {
   try {
-    const { target, purpose = 'phone_verify' } = req.body;
-    if (!target) {
-      return res.status(400).json({ success: false, message: 'Phone number or email is required' });
+    const { token } = req.body;
+    if (!token) {
+      return res.status(400).json({ success: false, message: 'Google credential token is required' });
     }
 
-    const cleanTarget = target.trim();
-    const otp = generateOTP();
-    const expiresAt = new Date(Date.now() + 3 * 60 * 1000);
+    // Verify token with Google
+    const ticket = await googleClient.verifyIdToken({
+      idToken: token,
+      audience: process.env.GOOGLE_CLIENT_ID
+    });
 
-    await pool.query(
-      'DELETE FROM verification_otps WHERE target = ? AND purpose = ?',
-      [cleanTarget, purpose]
-    );
+    const payload = ticket.getPayload();
+    const { sub: googleId, email, name, picture } = payload;
 
-    await pool.query(
-      'INSERT INTO verification_otps (target, otp, purpose, expires_at) VALUES (?, ?, ?, ?)',
-      [cleanTarget, otp, purpose, expiresAt]
-    );
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'No verified email returned from Google' });
+    }
 
-    console.log(`📱 [SMS/OTP] Target: ${cleanTarget} | Code: ${otp} | Purpose: ${purpose}`);
+    // Look up user by email
+    const [existing] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+    let user;
 
-    res.json({
+    if (existing.length > 0) {
+      user = existing[0];
+      // Sync avatar or google_id if missing
+      await pool.query(
+        'UPDATE users SET avatar_url = COALESCE(avatar_url, ?), is_email_verified = 1 WHERE id = ?',
+        [picture || null, user.id]
+      );
+    } else {
+      // Create user profile
+      const [insertResult] = await pool.query(
+        `INSERT INTO users (name, email, avatar_url, role, is_email_verified)
+         VALUES (?, ?, ?, 'customer', 1)`,
+        [name || 'Botanical User', email, picture || null]
+      );
+      const [newUser] = await pool.query('SELECT * FROM users WHERE id = ?', [insertResult.insertId]);
+      user = newUser[0];
+    }
+
+    // Issue Cookies
+    await issueAuthCookies(res, user);
+
+    const safeUser = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone || '',
+      role: user.role,
+      avatar_url: user.avatar_url || picture || null
+    };
+
+    return res.json({
       success: true,
-      message: `Verification code sent to ${cleanTarget}`,
-      demo_code: process.env.NODE_ENV !== 'production' ? otp : undefined
+      message: 'Google authentication successful',
+      data: { user: safeUser }
     });
   } catch (error) {
-    console.error('Send OTP error:', error);
-    res.status(500).json({ success: false, message: 'Failed to dispatch verification code' });
+    console.error('Google Auth Error:', error);
+    return res.status(401).json({ success: false, message: 'Invalid Google credential token: ' + error.message });
   }
 });
 
-// 2. VERIFY OTP
-router.post('/verify-otp', async (req, res) => {
+// 2. POST /api/auth/refresh (Silent Token Refresh via Cookie)
+router.post('/refresh', async (req, res) => {
   try {
-    const { target, otp, purpose = 'phone_verify' } = req.body;
-    if (!target || !otp) {
-      return res.status(400).json({ success: false, message: 'Target and OTP are required' });
+    const refreshToken = req.cookies?.refresh_token;
+
+    if (!refreshToken) {
+      return res.status(401).json({ success: false, message: 'Refresh token cookie missing' });
     }
 
+    // 1. Verify cryptographic signature
+    let decoded;
+    try {
+      decoded = jwt.verify(refreshToken, REFRESH_SECRET);
+    } catch (e) {
+      return res.status(403).json({ success: false, message: 'Invalid or expired refresh token' });
+    }
+
+    // 2. Validate token presence in MySQL database
+    const tokenHashValue = hashToken(refreshToken);
     const [rows] = await pool.query(
-      'SELECT * FROM verification_otps WHERE target = ? AND otp = ? AND purpose = ? AND expires_at > NOW()',
-      [target.trim(), otp.trim(), purpose]
+      'SELECT * FROM refresh_tokens WHERE token_hash = ? AND user_id = ? AND expires_at > NOW()',
+      [tokenHashValue, decoded.id]
     );
 
     if (rows.length === 0) {
-      return res.status(400).json({ success: false, message: 'Invalid or expired verification code' });
+      return res.status(403).json({ success: false, message: 'Session revoked or expired' });
     }
 
-    await pool.query('DELETE FROM verification_otps WHERE id = ?', [rows[0].id]);
-
-    if (purpose === 'phone_verify') {
-      await pool.query('UPDATE users SET is_phone_verified = TRUE WHERE phone = ?', [target.trim()]);
+    // 3. Retrieve user data
+    const [userRows] = await pool.query('SELECT id, name, email, phone, role, avatar_url FROM users WHERE id = ?', [decoded.id]);
+    if (userRows.length === 0) {
+      return res.status(404).json({ success: false, message: 'User record no longer exists' });
     }
+    const user = userRows[0];
 
-    res.json({ success: true, message: 'Verification successful' });
-  } catch (error) {
-    console.error('Verify OTP error:', error);
-    res.status(500).json({ success: false, message: 'Verification processing failed' });
-  }
-});
-
-// 3. REGISTER
-router.post('/register', async (req, res) => {
-  try {
-    const {
-      name,
-      email,
-      phone,
-      password,
-      address_line1,
-      town,
-      district,
-      province,
-      postal_code,
-      phone_verified = false
-    } = req.body;
-
-    if (!name || (!email && !phone)) {
-      return res.status(400).json({ success: false, message: 'Name and either email or phone are required' });
-    }
-
-    const cleanEmail = email ? email.toLowerCase().trim() : null;
-    const cleanPhone = phone ? phone.trim() : null;
-
-    if (cleanEmail) {
-      const [byEmail] = await pool.query('SELECT id FROM users WHERE email = ?', [cleanEmail]);
-      if (byEmail.length > 0) return res.status(409).json({ success: false, message: 'Email is already registered' });
-    }
-
-    if (cleanPhone) {
-      const [byPhone] = await pool.query('SELECT id FROM users WHERE phone = ?', [cleanPhone]);
-      if (byPhone.length > 0) return res.status(409).json({ success: false, message: 'Phone number is already registered' });
-    }
-
-    let hashedPassword = null;
-    if (password) {
-      hashedPassword = await bcrypt.hash(password, 10);
-    }
-
-    const [result] = await pool.query(
-      `INSERT INTO users 
-        (name, email, phone, password, role, is_phone_verified, is_email_verified, address_line1, town, district, province, postal_code) 
-       VALUES (?, ?, ?, ?, 'customer', ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        name.trim(),
-        cleanEmail,
-        cleanPhone,
-        hashedPassword,
-        phone_verified ? 1 : 0,
-        cleanEmail ? 1 : 0,
-        address_line1 || null,
-        town || null,
-        district || null,
-        province || null,
-        postal_code || null
-      ]
+    // 4. Issue a new 15-minute access token
+    const newAccessToken = jwt.sign(
+      { id: user.id, email: user.email, name: user.name, role: user.role },
+      ACCESS_SECRET,
+      { expiresIn: '15m' }
     );
 
-    const token = jwt.sign(
-      {
-        id: result.insertId,
-        name: name.trim(),
-        email: cleanEmail,
-        phone: cleanPhone,
-        role: 'customer'
-      },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
+    // 5. Overwrite the access_token cookie
+    res.cookie('access_token', newAccessToken, {
+      httpOnly: true,
+      secure: IS_PROD,
+      sameSite: 'lax',
+      maxAge: 15 * 60 * 1000,
+      path: '/'
+    });
 
-    res.status(201).json({
+    return res.json({
       success: true,
-      message: 'Account created successfully',
-      data: {
-        token,
-        user: {
-          id: result.insertId,
-          name: name.trim(),
-          email: cleanEmail,
-          phone: cleanPhone,
-          role: 'customer',
-          address_line1,
-          town,
-          district,
-          province,
-          postal_code
-        }
-      }
+      data: { user }
     });
   } catch (error) {
-    console.error('Registration error details:', error);
-    res.status(500).json({ success: false, message: error.message || 'Server error during registration' });
+    console.error('Refresh token error:', error);
+    return res.status(500).json({ success: false, message: 'Token refresh failed' });
   }
 });
 
-// 4. LOGIN
+// 3. POST /api/auth/logout (Clears Cookies & Revokes Database Session)
+router.post('/logout', async (req, res) => {
+  try {
+    const refreshToken = req.cookies?.refresh_token;
+    if (refreshToken) {
+      const tokenHashValue = hashToken(refreshToken);
+      await pool.query('DELETE FROM refresh_tokens WHERE token_hash = ?', [tokenHashValue]);
+    }
+
+    res.clearCookie('access_token', { path: '/' });
+    res.clearCookie('refresh_token', { path: '/' });
+
+    return res.json({ success: true, message: 'Signed out successfully' });
+  } catch (error) {
+    console.error('Logout error:', error);
+    return res.status(500).json({ success: false, message: 'Logout failed' });
+  }
+});
+
+// 4. GET /api/auth/me (Check current logged-in user from Cookie)
+router.get('/me', verifyToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, name, email, phone, role, avatar_url, address_line1, town, district, province, postal_code 
+       FROM users WHERE id = ?`,
+      [req.user.id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    return res.json({ success: true, data: { user: rows[0] } });
+  } catch (error) {
+    console.error('Fetch me error:', error);
+    return res.status(500).json({ success: false, message: 'Server error retrieving profile' });
+  }
+});
+
+// 5. POST /api/auth/login (Standard email/password login supporting cookies)
 router.post('/login', async (req, res) => {
   try {
-    const { identifier, password, require_admin } = req.body;
+    const { identifier, email, password, require_admin } = req.body;
+    const loginId = (identifier || email || '').trim();
 
-    if (!identifier || !password) {
+    if (!loginId || !password) {
       return res.status(400).json({ success: false, message: 'Identifier (email/phone) and password are required' });
     }
 
-    const cleanId = identifier.trim();
-
     const [rows] = await pool.query(
       'SELECT * FROM users WHERE email = ? OR phone = ? LIMIT 1',
-      [cleanId.toLowerCase(), cleanId]
+      [loginId, loginId]
     );
 
     if (rows.length === 0) {
-      return res.status(401).json({ success: false, message: 'No account found with this email or phone number' });
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
     const user = rows[0];
 
     if (require_admin && user.role !== 'admin') {
-      return res.status(403).json({ success: false, message: 'Access denied: Administrator privileges required' });
+      return res.status(403).json({ success: false, message: 'Administrative access restricted' });
     }
 
     if (!user.password) {
-      return res.status(400).json({
-        success: false,
-        message: 'This account was authenticated via Google. Please click "Continue with Google" or reset password.'
-      });
+      return res.status(400).json({ success: false, message: 'Please sign in with Google' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(401).json({ success: false, message: 'Invalid password. Please verify your credentials.' });
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
-    const token = jwt.sign(
-      {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        role: user.role
-      },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
+    await issueAuthCookies(res, user);
 
-    res.json({
+    const safeUser = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      avatar_url: user.avatar_url
+    };
+
+    return res.json({
       success: true,
-      message: 'Logged in successfully',
-      data: {
-        token,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
-          avatar_url: user.avatar_url,
-          role: user.role,
-          address_line1: user.address_line1,
-          town: user.town,
-          district: user.district,
-          province: user.province,
-          postal_code: user.postal_code
-        }
-      }
+      message: 'Login successful',
+      data: { user: safeUser }
     });
   } catch (error) {
-    console.error('Login error details:', error);
-    res.status(500).json({ success: false, message: error.message || 'Server error during login' });
+    console.error('Login error:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
 
-// 5. GOOGLE AUTH
-router.post('/google', async (req, res) => {
-  try {
-    const { google_id, email, name, avatar_url } = req.body;
-
-    if (!google_id || !email) {
-      return res.status(400).json({ success: false, message: 'Google authentication payload missing' });
-    }
-
-    const cleanEmail = email.toLowerCase().trim();
-
-    const [existing] = await pool.query(
-      'SELECT * FROM users WHERE google_id = ? OR email = ? LIMIT 1',
-      [google_id, cleanEmail]
-    );
-
-    let user;
-    if (existing.length > 0) {
-      user = existing[0];
-      await pool.query(
-        'UPDATE users SET google_id = COALESCE(google_id, ?), avatar_url = COALESCE(avatar_url, ?) WHERE id = ?',
-        [google_id, avatar_url || null, user.id]
-      );
-    } else {
-      // Provide an empty string or random hash if strict mode expects a string for password
-      const placeholderPassword = await bcrypt.hash(Math.random().toString(36), 10);
-      const [insertRes] = await pool.query(
-        `INSERT INTO users (name, email, password, google_id, avatar_url, is_email_verified, role) 
-         VALUES (?, ?, ?, ?, ?, 1, 'customer')`,
-        [name || 'Google Member', cleanEmail, placeholderPassword, google_id, avatar_url || null]
-      );
-      const [newUser] = await pool.query('SELECT * FROM users WHERE id = ?', [insertRes.insertId]);
-      user = newUser[0];
-    }
-
-    const token = jwt.sign(
-      { id: user.id, name: user.name, email: user.email, role: user.role },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    res.json({
-      success: true,
-      message: 'Google authentication verified',
-      data: {
-        token,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
-          avatar_url: user.avatar_url,
-          role: user.role,
-          address_line1: user.address_line1,
-          town: user.town,
-          district: user.district,
-          province: user.province,
-          postal_code: user.postal_code
-        }
-      }
-    });
-  } catch (error) {
-    console.error('Google auth error details:', error);
-    res.status(500).json({ success: false, message: error.message || 'Google authentication failed' });
-  }
-});
-
-// 6. RESET PASSWORD
-router.post('/reset-password', async (req, res) => {
-  try {
-    const { target, otp, new_password } = req.body;
-
-    if (!target || !otp || !new_password) {
-      return res.status(400).json({ success: false, message: 'Target, OTP code, and new password are required' });
-    }
-
-    const cleanTarget = target.trim();
-
-    const [otps] = await pool.query(
-      'SELECT * FROM verification_otps WHERE target = ? AND otp = ? AND purpose = "forgot_password" AND expires_at > NOW()',
-      [cleanTarget, otp.trim()]
-    );
-
-    if (otps.length === 0) {
-      return res.status(400).json({ success: false, message: 'Invalid or expired reset code' });
-    }
-
-    const hashedPassword = await bcrypt.hash(new_password, 10);
-
-    const [userUpdate] = await pool.query(
-      'UPDATE users SET password = ? WHERE email = ? OR phone = ?',
-      [hashedPassword, cleanTarget.toLowerCase(), cleanTarget]
-    );
-
-    if (userUpdate.affectedRows === 0) {
-      return res.status(404).json({ success: false, message: 'No registered user matches this email or phone' });
-    }
-
-    await pool.query('DELETE FROM verification_otps WHERE id = ?', [otps[0].id]);
-
-    res.json({ success: true, message: 'Password reset successfully' });
-  } catch (error) {
-    console.error('Password reset error details:', error);
-    res.status(500).json({ success: false, message: error.message || 'Password reset procedure failed' });
-  }
-});
-
-// Overview & Profile
+// 6. GET /api/auth/admin/overview (KPI Stats for Dashboard)
 router.get('/admin/overview', verifyAdmin, async (req, res) => {
   try {
-    const [[{ total_orders }]] = await pool.query('SELECT COUNT(*) AS total_orders FROM orders');
-    const [[{ total_revenue }]] = await pool.query('SELECT COALESCE(SUM(total_amount), 0) AS total_revenue FROM orders');
-    const [[{ total_products }]] = await pool.query('SELECT COUNT(*) AS total_products FROM products');
-    const [[{ low_stock_count }]] = await pool.query('SELECT COUNT(*) AS low_stock_count FROM products WHERE stock_quantity < 15');
-    const [recent_orders] = await pool.query('SELECT * FROM orders ORDER BY id DESC LIMIT 10');
+    const [[{ total_orders }]] = await pool.query('SELECT COUNT(*) as total_orders FROM orders');
+    const [[{ total_revenue }]] = await pool.query('SELECT COALESCE(SUM(total_amount), 0) as total_revenue FROM orders WHERE status != "cancelled"');
+    const [[{ low_stock_count }]] = await pool.query('SELECT COUNT(*) as low_stock_count FROM products WHERE stock_quantity < 15');
+    const [recent_orders] = await pool.query('SELECT * FROM orders ORDER BY id DESC LIMIT 50');
 
     res.json({
       success: true,
       data: {
         total_orders,
-        total_revenue: Number(total_revenue),
-        total_products,
+        total_revenue,
         low_stock_count,
         recent_orders
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error('Admin overview error:', error);
+    res.status(500).json({ success: false, message: 'Failed to retrieve overview stats' });
   }
 });
 

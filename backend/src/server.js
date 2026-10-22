@@ -1,14 +1,13 @@
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import pool from './config/db.js';
 
+import authRoutes from './routes/authRoutes.js';
 import productRoutes from './routes/productRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
-import authRoutes from './routes/authRoutes.js';
-import routineRoutes from './routes/routineRoutes.js';
 
 dotenv.config();
 
@@ -17,33 +16,34 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
-// Middleware
-app.use(cors());
+// 1. Enable CORS with credentials for cookies
+app.use(
+  cors({
+    origin: FRONTEND_URL,
+    credentials: true,
+  })
+);
+
+// 2. Parsers
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
-// Serve static uploaded photos from backend/uploads
+// 3. Static directory for uploads
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
-// API Routes
-app.use('/api', productRoutes);
-app.use('/api/orders', orderRoutes);
+// 4. API Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/routine', routineRoutes);
+app.use('/api/products', productRoutes);
+app.use('/api/orders', orderRoutes);
 
-// Health check endpoint
+// Health check
 app.get('/api/health', (req, res) => {
-  res.json({ success: true, message: 'Fancy Store Backend is running cleanly' });
+  res.json({ status: 'ok', timestamp: new Date() });
 });
 
-// Start Server
-app.listen(PORT, async () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-  try {
-    const connection = await pool.getConnection();
-    console.log('✅ Connected to MySQL Database (fancy_store_db)');
-    connection.release();
-  } catch (err) {
-    console.error('❌ MySQL Connection Error:', err.message);
-  }
+app.listen(PORT, () => {
+  console.log(`🌿 Fancy Store backend running on http://localhost:${PORT}`);
 });
